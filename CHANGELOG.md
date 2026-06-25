@@ -15,3 +15,4 @@ last-change: added initial project changelog
 - Added the MCP server scaffold with map read, draft write, and planning workflow tools.
 - Added shared geospatial and planning type contracts.
 - Added the product roadmap and project documentation.
+- Split the web editor production bundle into stable vendor chunks to remove the Vite large chunk warning.

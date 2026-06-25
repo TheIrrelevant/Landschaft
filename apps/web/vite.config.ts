@@ -1,14 +1,65 @@
 /*
  * type: config
  * description: Vite configuration for the Landschaft web editor.
- * last-updated: 2026-06-24
+ * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: added React Vite configuration
+ * last-change: split large vendor bundles into stable chunks
  */
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  build: {
+    chunkSizeWarningLimit: 750,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return undefined;
+          }
+
+          if (
+            id.includes("/react/") ||
+            id.includes("/react-dom/") ||
+            id.includes("/scheduler/")
+          ) {
+            return "react-vendor";
+          }
+
+          if (id.includes("/three/")) {
+            return "three-core";
+          }
+
+          if (
+            id.includes("/@react-three/fiber/") ||
+            id.includes("/@react-three/drei/")
+          ) {
+            return "react-three";
+          }
+
+          if (
+            id.includes("/three-stdlib/") ||
+            id.includes("/maath/") ||
+            id.includes("/troika-") ||
+            id.includes("/camera-controls/") ||
+            id.includes("/meshline/")
+          ) {
+            return "three-helpers";
+          }
+
+          if (
+            id.includes("/@turf/") ||
+            id.includes("/proj4/") ||
+            id.includes("/zod/")
+          ) {
+            return "geospatial";
+          }
+
+          return "vendor";
+        }
+      }
+    }
+  },
   plugins: [react()],
   server: {
     port: 5173

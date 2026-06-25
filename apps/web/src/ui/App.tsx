@@ -4,7 +4,7 @@
  * description: Main Landschaft editor shell.
  * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: added checkpoint 1 terrain setup workflow
+ * last-change: redesigned editor shell for a compact GIS workflow
  * ---end-metadata---
  */
 import { Layers, Map, MousePointer2, PanelRight, Route } from "lucide-react";
@@ -13,24 +13,43 @@ import { useEditorStore } from "../state/editorStore";
 import { TerrainSetupPanel } from "./TerrainSetupPanel";
 
 export function App() {
-  const { activeMode, setMode } = useEditorStore();
+  const { activeMode, project, setMode, terrain } = useEditorStore();
 
   return (
     <main className="editor-shell">
-      <aside className="sidebar">
+      <header className="app-bar">
         <div className="brand">
-          <Map size={22} />
+          <Map size={20} />
           <div>
             <strong>Landschaft</strong>
-            <span>Landscape planning editor</span>
+            <span>Vector-first landscape planning</span>
           </div>
         </div>
+        <div className="project-strip">
+          <span>{project.name}</span>
+          <span>{project.coordinateReferenceSystem}</span>
+          <span>{terrain.accuracyStatus}</span>
+        </div>
+        <button className="primary-action" type="button">
+          <Route size={16} />
+          Planning Workflow
+        </button>
+      </header>
+
+      <aside className="sidebar">
         <TerrainSetupPanel />
         <LayerPanel />
       </aside>
 
       <section className="workspace">
-        <header className="toolbar">
+        <header className="viewbar">
+          <div className="view-title">
+            <strong>Terrain Workspace</strong>
+            <span>
+              {project.realWorldExtentMeters.width}m x{" "}
+              {project.realWorldExtentMeters.depth}m
+            </span>
+          </div>
           <div className="segmented-control">
             <button
               className={activeMode === "terrain-3d" ? "active" : ""}
@@ -47,10 +66,6 @@ export function App() {
               Top View
             </button>
           </div>
-          <button className="primary-action" type="button">
-            <Route size={16} />
-            Planning Workflow
-          </button>
         </header>
 
         <div className="canvas-area">
@@ -77,14 +92,17 @@ function LayerPanel() {
       <div className="layer-list">
         {layers.map((layer) => (
           <article className="layer-row" key={layer.id}>
-            <label>
-              <input
-                checked={layer.visible}
-                onChange={() => toggleLayer(layer.id)}
-                type="checkbox"
-              />
-              <span>{layer.name}</span>
-            </label>
+            <div className="layer-header">
+              <label>
+                <input
+                  checked={layer.visible}
+                  onChange={() => toggleLayer(layer.id)}
+                  type="checkbox"
+                />
+                <span>{layer.name}</span>
+              </label>
+              <small>{layer.kind}</small>
+            </div>
             <input
               aria-label={`${layer.name} opacity`}
               max="1"
@@ -110,7 +128,7 @@ function AreaInspector() {
     return (
       <section className="panel empty-state">
         <MousePointer2 size={20} />
-        <p>Select a coded landscape area to inspect planning intelligence.</p>
+        <p>Select a coded area to inspect planning intelligence.</p>
       </section>
     );
   }

@@ -17,3 +17,4 @@ last-change: added initial project changelog
 - Added the product roadmap and project documentation.
 - Split the web editor production bundle into stable vendor chunks to remove the Vite large chunk warning.
 - Started checkpoint 1 with orthophoto upload, corner-coordinate metadata, generated heightmap terrain, and terrain accuracy status in the editor.
+- Redesigned the checkpoint 1 editor UI into a compact GIS workspace layout.

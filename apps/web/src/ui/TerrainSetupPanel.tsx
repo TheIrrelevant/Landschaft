@@ -4,10 +4,10 @@
  * description: Checkpoint 1 terrain setup controls for orthophoto and corner coordinates.
  * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: added orthophoto terrain setup panel
+ * last-change: redesigned terrain setup as a compact import module
  * ---end-metadata---
  */
-import { ImageUp, Mountain } from "lucide-react";
+import { ImageUp, Mountain, RefreshCw } from "lucide-react";
 import { useEditorStore } from "../state/editorStore";
 
 export function TerrainSetupPanel() {
@@ -21,14 +21,17 @@ export function TerrainSetupPanel() {
 
   return (
     <section className="panel terrain-setup">
-      <h2>
-        <Mountain size={18} />
-        Terrain Base
-      </h2>
+      <div className="panel-heading">
+        <h2>
+          <Mountain size={18} />
+          Terrain Import
+        </h2>
+        <span>Checkpoint 1</span>
+      </div>
 
       <label className="file-control">
         <ImageUp size={16} />
-        <span>{project.sourceImageName ?? "Upload orthophoto"}</span>
+        <span>{project.sourceImageName ?? "Select orthophoto"}</span>
         <input
           accept="image/*"
           onChange={(event) => {
@@ -42,12 +45,17 @@ export function TerrainSetupPanel() {
         />
       </label>
 
-      <div className="corner-grid">
+      <div className="coordinate-table">
+        <div className="coordinate-row coordinate-head">
+          <span>Corner</span>
+          <span>Latitude</span>
+          <span>Longitude</span>
+        </div>
         {project.corners.map((corner) => (
-          <fieldset className="corner-card" key={corner.label}>
-            <legend>{corner.label}</legend>
+          <div className="coordinate-row" key={corner.label}>
+            <strong>{corner.label}</strong>
             <label>
-              <span>Lat</span>
+              <span>Latitude</span>
               <input
                 onChange={(event) =>
                   setCornerCoordinate(
@@ -62,7 +70,7 @@ export function TerrainSetupPanel() {
               />
             </label>
             <label>
-              <span>Lng</span>
+              <span>Longitude</span>
               <input
                 onChange={(event) =>
                   setCornerCoordinate(
@@ -76,28 +84,29 @@ export function TerrainSetupPanel() {
                 value={corner.longitude}
               />
             </label>
-          </fieldset>
+          </div>
         ))}
       </div>
 
       <button className="secondary-action" onClick={generateTerrain} type="button">
+        <RefreshCw size={15} />
         Generate Terrain
       </button>
 
       <dl className="status-list">
         <div>
-          <dt>Extent</dt>
+          <dt>Map extent</dt>
           <dd>
             {project.realWorldExtentMeters.width}m x{" "}
             {project.realWorldExtentMeters.depth}m
           </dd>
         </div>
         <div>
-          <dt>Accuracy</dt>
+          <dt>Accuracy status</dt>
           <dd>{terrain.accuracyStatus}</dd>
         </div>
         <div>
-          <dt>Elevation</dt>
+          <dt>Elevation range</dt>
           <dd>
             {terrain.minElevation.toFixed(1)}m -{" "}
             {terrain.maxElevation.toFixed(1)}m

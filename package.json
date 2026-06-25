@@ -1,0 +1,29 @@
+{
+  "name": "landschaft",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vector-first landscape planning editor with Three.js terrain and MCP control server.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @landschaft/web",
+    "dev:web": "npm run dev -w @landschaft/web",
+    "dev:mcp": "npm run dev -w @landschaft/mcp-server",
+    "build": "npm run build -ws",
+    "typecheck": "npm run typecheck -ws",
+    "lint": "npm run lint -ws"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.50.0"
+  }
+}

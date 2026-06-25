@@ -1,10 +1,10 @@
 /*
  * ---metadata---
  * type: app-source
- * description: Checkpoint 1 terrain setup controls for orthophoto and corner coordinates.
+ * description: Upload-first orthophoto setup with sequential corner coordinate prompts.
  * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: redesigned terrain setup as a compact import module
+ * last-change: replaced coordinate table with sequential upload-driven prompts
  * ---end-metadata---
  */
 import { ImageUp, Mountain, RefreshCw } from "lucide-react";
@@ -12,26 +12,29 @@ import { useEditorStore } from "../state/editorStore";
 
 export function TerrainSetupPanel() {
   const {
+    advanceCoordinateStep,
+    coordinateStep,
     generateTerrain,
     project,
     setCornerCoordinate,
-    setOrthophotoPreview,
-    terrain
+    setOrthophotoPreview
   } = useEditorStore();
+  const activeCorner =
+    coordinateStep !== null && coordinateStep < project.corners.length
+      ? project.corners[coordinateStep]
+      : null;
+  const activeStep = coordinateStep ?? 0;
 
   return (
-    <section className="panel terrain-setup">
-      <div className="panel-heading">
-        <h2>
-          <Mountain size={18} />
-          Terrain Import
-        </h2>
-        <span>Checkpoint 1</span>
-      </div>
+    <section className="terrain-setup">
+      <h2>
+        <Mountain size={16} />
+        Orthophoto
+      </h2>
 
       <label className="file-control">
-        <ImageUp size={16} />
-        <span>{project.sourceImageName ?? "Select orthophoto"}</span>
+        <ImageUp size={15} />
+        <span>{project.sourceImageName ?? "Upload orthophoto"}</span>
         <input
           accept="image/*"
           onChange={(event) => {
@@ -45,74 +48,89 @@ export function TerrainSetupPanel() {
         />
       </label>
 
-      <div className="coordinate-table">
-        <div className="coordinate-row coordinate-head">
-          <span>Corner</span>
-          <span>Latitude</span>
-          <span>Longitude</span>
-        </div>
-        {project.corners.map((corner) => (
-          <div className="coordinate-row" key={corner.label}>
-            <strong>{corner.label}</strong>
+      {activeCorner ? (
+        <div className="coordinate-step">
+          <div className="step-header">
+            <span>
+              {activeStep + 1}/{project.corners.length}
+            </span>
+            <strong>{getCornerName(activeCorner.label)}</strong>
+          </div>
+          <div className="coordinate-fields">
             <label>
-              <span>Latitude</span>
+              Latitude
               <input
                 onChange={(event) =>
                   setCornerCoordinate(
-                    corner.label,
+                    activeCorner.label,
                     "latitude",
                     Number(event.target.value)
                   )
                 }
                 step="0.000001"
                 type="number"
-                value={corner.latitude}
+                value={activeCorner.latitude}
               />
             </label>
             <label>
-              <span>Longitude</span>
+              Longitude
               <input
                 onChange={(event) =>
                   setCornerCoordinate(
-                    corner.label,
+                    activeCorner.label,
                     "longitude",
                     Number(event.target.value)
                   )
                 }
                 step="0.000001"
                 type="number"
-                value={corner.longitude}
+                value={activeCorner.longitude}
               />
             </label>
           </div>
-        ))}
-      </div>
+          <button
+            className="secondary-action"
+            onClick={
+              activeStep === project.corners.length - 1
+                ? generateTerrain
+                : advanceCoordinateStep
+            }
+            type="button"
+          >
+            <RefreshCw size={13} />
+            {activeStep === project.corners.length - 1
+              ? "Generate terrain"
+              : "Next coordinate"}
+          </button>
+        </div>
+      ) : (
+        <p className="upload-note">
+          After upload, coordinates are requested from top-left clockwise.
+        </p>
+      )}
 
-      <button className="secondary-action" onClick={generateTerrain} type="button">
-        <RefreshCw size={15} />
-        Generate Terrain
-      </button>
-
-      <dl className="status-list">
-        <div>
-          <dt>Map extent</dt>
-          <dd>
-            {project.realWorldExtentMeters.width}m x{" "}
-            {project.realWorldExtentMeters.depth}m
-          </dd>
+      {coordinateStep === project.corners.length ? (
+        <div className="terrain-summary">
+          <span>{project.realWorldExtentMeters.width}m</span>
+          <span>{project.realWorldExtentMeters.depth}m</span>
+          <span>external-dem</span>
         </div>
-        <div>
-          <dt>Accuracy status</dt>
-          <dd>{terrain.accuracyStatus}</dd>
-        </div>
-        <div>
-          <dt>Elevation range</dt>
-          <dd>
-            {terrain.minElevation.toFixed(1)}m -{" "}
-            {terrain.maxElevation.toFixed(1)}m
-          </dd>
-        </div>
-      </dl>
+      ) : null}
     </section>
   );
+}
+
+function getCornerName(label: string) {
+  switch (label) {
+    case "NW":
+      return "Top-left coordinate";
+    case "NE":
+      return "Top-right coordinate";
+    case "SE":
+      return "Bottom-right coordinate";
+    case "SW":
+      return "Bottom-left coordinate";
+    default:
+      return "Coordinate";
+  }
 }

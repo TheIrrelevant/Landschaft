@@ -4,52 +4,44 @@
  * description: Main Landschaft editor shell.
  * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: redesigned editor shell for a compact GIS workflow
+ * last-change: removed top navigation and added Photoshop-style layer sidebar
  * ---end-metadata---
  */
-import { Layers, Map, MousePointer2, PanelRight, Route } from "lucide-react";
+import {
+  Blend,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Image,
+  Layers,
+  Lock,
+  Map,
+  SlidersHorizontal,
+  X
+} from "lucide-react";
 import { TerrainScene } from "../scene/TerrainScene";
 import { useEditorStore } from "../state/editorStore";
 import { TerrainSetupPanel } from "./TerrainSetupPanel";
 
 export function App() {
-  const { activeMode, project, setMode, terrain } = useEditorStore();
+  const { activeMode, setMode } = useEditorStore();
 
   return (
     <main className="editor-shell">
-      <header className="app-bar">
+      <aside className="sidebar">
         <div className="brand">
           <Map size={20} />
           <div>
             <strong>Landschaft</strong>
-            <span>Vector-first landscape planning</span>
+            <span>Landscape editor</span>
           </div>
         </div>
-        <div className="project-strip">
-          <span>{project.name}</span>
-          <span>{project.coordinateReferenceSystem}</span>
-          <span>{terrain.accuracyStatus}</span>
-        </div>
-        <button className="primary-action" type="button">
-          <Route size={16} />
-          Planning Workflow
-        </button>
-      </header>
-
-      <aside className="sidebar">
         <TerrainSetupPanel />
         <LayerPanel />
       </aside>
 
       <section className="workspace">
-        <header className="viewbar">
-          <div className="view-title">
-            <strong>Terrain Workspace</strong>
-            <span>
-              {project.realWorldExtentMeters.width}m x{" "}
-              {project.realWorldExtentMeters.depth}m
-            </span>
-          </div>
+        <div className="canvas-area">
           <div className="segmented-control">
             <button
               className={activeMode === "terrain-3d" ? "active" : ""}
@@ -66,45 +58,95 @@ export function App() {
               Top View
             </button>
           </div>
-        </header>
-
-        <div className="canvas-area">
           <TerrainScene />
         </div>
       </section>
 
-      <aside className="inspector">
-        <AreaInspector />
-      </aside>
+      <LayerInspector />
     </main>
   );
 }
 
 function LayerPanel() {
-  const { layers, setLayerOpacity, toggleLayer } = useEditorStore();
+  const {
+    layers,
+    selectedLayerId,
+    selectLayer,
+    setLayerOpacity,
+    toggleLayer
+  } = useEditorStore();
 
   return (
-    <section className="panel">
-      <h2>
-        <Layers size={18} />
-        Layers
-      </h2>
+    <section className="layers-panel">
+      <div className="panel-tabs">
+        <button className="active" type="button">
+          Layers
+        </button>
+        <button type="button">Channels</button>
+        <button type="button">Paths</button>
+      </div>
+
+      <div className="layer-filter-row">
+        <button type="button">
+          <SlidersHorizontal size={14} />
+          Kind
+          <ChevronDown size={13} />
+        </button>
+        <Image size={15} />
+        <Blend size={15} />
+        <Layers size={15} />
+      </div>
+
+      <div className="layer-control-row">
+        <button type="button">
+          Normal
+          <ChevronDown size={13} />
+        </button>
+        <label>
+          Opacity
+          <input
+            max="100"
+            min="0"
+            readOnly
+            type="number"
+            value={100}
+          />
+        </label>
+      </div>
+
+      <div className="layer-lock-row">
+        <span>Lock:</span>
+        <Lock size={14} />
+        <span>Fill:</span>
+        <strong>100%</strong>
+      </div>
+
       <div className="layer-list">
         {layers.map((layer) => (
-          <article className="layer-row" key={layer.id}>
-            <div className="layer-header">
-              <label>
-                <input
-                  checked={layer.visible}
-                  onChange={() => toggleLayer(layer.id)}
-                  type="checkbox"
-                />
-                <span>{layer.name}</span>
-              </label>
-              <small>{layer.kind}</small>
+          <article
+            className={`layer-row ${selectedLayerId === layer.id ? "active" : ""}`}
+            key={layer.id}
+            onClick={() => selectLayer(layer.id)}
+          >
+            <button
+              aria-label={`${layer.visible ? "Hide" : "Show"} ${layer.name}`}
+              className="visibility-button"
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleLayer(layer.id);
+              }}
+              type="button"
+            >
+              {layer.visible ? <Eye size={16} /> : <EyeOff size={16} />}
+            </button>
+            <div className="layer-thumbnail" />
+            <div className="layer-meta">
+              <strong>{layer.name}</strong>
+              <span>{layer.kind}</span>
             </div>
             <input
               aria-label={`${layer.name} opacity`}
+              className="layer-opacity"
               max="1"
               min="0"
               onChange={(event) =>
@@ -121,60 +163,45 @@ function LayerPanel() {
   );
 }
 
-function AreaInspector() {
-  const { project, selectedArea, terrain } = useEditorStore();
+function LayerInspector() {
+  const { closeInspector, inspectorOpen, layers, project, selectedLayerId, terrain } =
+    useEditorStore();
+  const selectedLayer = layers.find((layer) => layer.id === selectedLayerId);
 
-  if (!selectedArea) {
-    return (
-      <section className="panel empty-state">
-        <MousePointer2 size={20} />
-        <p>Select a coded area to inspect planning intelligence.</p>
-      </section>
-    );
+  if (!inspectorOpen || !selectedLayer) {
+    return null;
   }
 
   return (
-    <section className="panel">
-      <h2>
-        <PanelRight size={18} />
-        Area Info
-      </h2>
+    <aside className="inspector-drawer">
+      <header>
+        <strong>{selectedLayer.name}</strong>
+        <button aria-label="Close inspector" onClick={closeInspector} type="button">
+          <X size={16} />
+        </button>
+      </header>
       <dl className="info-list">
         <div>
-          <dt>ID</dt>
-          <dd>{selectedArea.id}</dd>
+          <dt>Layer type</dt>
+          <dd>{selectedLayer.kind}</dd>
         </div>
         <div>
-          <dt>Label</dt>
-          <dd>{selectedArea.label}</dd>
+          <dt>Review status</dt>
+          <dd>{selectedLayer.reviewStatus}</dd>
         </div>
         <div>
-          <dt>Code</dt>
-          <dd>{selectedArea.code}</dd>
+          <dt>Opacity</dt>
+          <dd>{Math.round(selectedLayer.opacity * 100)}%</dd>
         </div>
         <div>
-          <dt>Meaning</dt>
-          <dd>{selectedArea.meaning}</dd>
-        </div>
-        <div>
-          <dt>Confidence</dt>
-          <dd>{Math.round(selectedArea.confidence * 100)}%</dd>
-        </div>
-      </dl>
-      <dl className="info-list">
-        <div>
-          <dt>Project CRS</dt>
+          <dt>CRS</dt>
           <dd>{project.coordinateReferenceSystem}</dd>
         </div>
         <div>
-          <dt>Height Source</dt>
+          <dt>Elevation source</dt>
           <dd>{terrain.elevationProvider}</dd>
         </div>
-        <div>
-          <dt>Terrain Status</dt>
-          <dd>{terrain.accuracyStatus}</dd>
-        </div>
       </dl>
-    </section>
+    </aside>
   );
 }

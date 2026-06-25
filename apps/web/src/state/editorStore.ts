@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: added checkpoint 1 terrain import workflow state
+ * last-change: added minimal upload-first terrain and layer inspector state
  * ---end-metadata---
  */
 import type {
@@ -22,7 +22,12 @@ interface EditorState {
   terrain: TerrainModel;
   orthophotoPreviewUrl: string | null;
   selectedArea: CodedArea | null;
+  selectedLayerId: string | null;
+  coordinateStep: number | null;
+  inspectorOpen: boolean;
   activeMode: "top-view" | "terrain-3d";
+  advanceCoordinateStep: () => void;
+  closeInspector: () => void;
   generateTerrain: () => void;
   setCornerCoordinate: (
     label: OrthophotoCorner["label"],
@@ -30,6 +35,7 @@ interface EditorState {
     value: number
   ) => void;
   selectArea: (area: CodedArea | null) => void;
+  selectLayer: (layerId: string) => void;
   setMode: (mode: EditorState["activeMode"]) => void;
   setOrthophotoPreview: (fileName: string, previewUrl: string) => void;
   setLayerOpacity: (layerId: string, opacity: number) => void;
@@ -143,6 +149,9 @@ export const useEditorStore = create<EditorState>((set) => ({
   project: initialProject,
   terrain: createTerrain(defaultCorners),
   orthophotoPreviewUrl: null,
+  coordinateStep: null,
+  inspectorOpen: false,
+  selectedLayerId: null,
   selectedArea: {
     id: "a21kd49pe2",
     label: "Dry Exposed Slope Character",
@@ -159,10 +168,17 @@ export const useEditorStore = create<EditorState>((set) => ({
     confidence: 0.74
   },
   activeMode: "terrain-3d",
+  advanceCoordinateStep: () =>
+    set((state) => ({
+      coordinateStep:
+        state.coordinateStep === null ? 0 : Math.min(state.coordinateStep + 1, 4)
+    })),
+  closeInspector: () => set({ inspectorOpen: false }),
   generateTerrain: () =>
     set((state) => ({
       project: createProject(state.project.corners),
-      terrain: createTerrain(state.project.corners)
+      terrain: createTerrain(state.project.corners),
+      coordinateStep: 4
     })),
   setCornerCoordinate: (label, axis, value) =>
     set((state) => {
@@ -178,9 +194,15 @@ export const useEditorStore = create<EditorState>((set) => ({
       };
     }),
   selectArea: (area) => set({ selectedArea: area }),
+  selectLayer: (layerId) =>
+    set({
+      selectedLayerId: layerId,
+      inspectorOpen: true
+    }),
   setMode: (mode) => set({ activeMode: mode }),
   setOrthophotoPreview: (fileName, previewUrl) =>
     set((state) => ({
+      coordinateStep: 0,
       orthophotoPreviewUrl: previewUrl,
       project: {
         ...state.project,

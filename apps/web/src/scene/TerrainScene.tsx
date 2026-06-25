@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: render generated heightmap terrain with optional orthophoto texture
+ * last-change: keep default canvas empty until terrain is generated
  * ---end-metadata---
  */
 import { Grid, OrbitControls } from "@react-three/drei";
@@ -77,11 +77,13 @@ function TerrainPlane() {
 }
 
 export function TerrainScene() {
+  const terrainGenerated = useEditorStore((state) => state.terrainGenerated);
+
   return (
     <Canvas camera={{ position: [34, 34, 34], fov: 42 }} shadows>
       <ambientLight intensity={0.7} />
       <directionalLight position={[18, 28, 12]} intensity={1.2} castShadow />
-      <TerrainPlane />
+      {terrainGenerated ? <TerrainPlane /> : null}
       <Grid
         args={[80, 80]}
         cellColor="#d6dfd0"

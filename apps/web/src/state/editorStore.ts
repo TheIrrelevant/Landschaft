@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: added minimal upload-first terrain and layer inspector state
+ * last-change: added layer reordering and blank default canvas state
  * ---end-metadata---
  */
 import type {
@@ -20,6 +20,7 @@ interface EditorState {
   layers: PlanningLayer[];
   project: ProjectMetadata;
   terrain: TerrainModel;
+  terrainGenerated: boolean;
   orthophotoPreviewUrl: string | null;
   selectedArea: CodedArea | null;
   selectedLayerId: string | null;
@@ -29,6 +30,7 @@ interface EditorState {
   advanceCoordinateStep: () => void;
   closeInspector: () => void;
   generateTerrain: () => void;
+  reorderLayer: (sourceLayerId: string, targetLayerId: string) => void;
   setCornerCoordinate: (
     label: OrthophotoCorner["label"],
     axis: "latitude" | "longitude",
@@ -148,6 +150,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   layers: defaultLayers,
   project: initialProject,
   terrain: createTerrain(defaultCorners),
+  terrainGenerated: false,
   orthophotoPreviewUrl: null,
   coordinateStep: null,
   inspectorOpen: false,
@@ -178,8 +181,28 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => ({
       project: createProject(state.project.corners),
       terrain: createTerrain(state.project.corners),
+      terrainGenerated: true,
       coordinateStep: 4
     })),
+  reorderLayer: (sourceLayerId, targetLayerId) =>
+    set((state) => {
+      const sourceIndex = state.layers.findIndex(
+        (layer) => layer.id === sourceLayerId
+      );
+      const targetIndex = state.layers.findIndex(
+        (layer) => layer.id === targetLayerId
+      );
+
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+        return state;
+      }
+
+      const layers = [...state.layers];
+      const [movedLayer] = layers.splice(sourceIndex, 1);
+      layers.splice(targetIndex, 0, movedLayer);
+
+      return { layers };
+    }),
   setCornerCoordinate: (label, axis, value) =>
     set((state) => {
       const corners = state.project.corners.map((corner) =>

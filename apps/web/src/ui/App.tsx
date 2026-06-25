@@ -1,13 +1,16 @@
 /*
+ * ---metadata---
  * type: app-source
  * description: Main Landschaft editor shell.
- * last-updated: 2026-06-24
+ * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: added initial editor UI
+ * last-change: added checkpoint 1 terrain setup workflow
+ * ---end-metadata---
  */
 import { Layers, Map, MousePointer2, PanelRight, Route } from "lucide-react";
 import { TerrainScene } from "../scene/TerrainScene";
 import { useEditorStore } from "../state/editorStore";
+import { TerrainSetupPanel } from "./TerrainSetupPanel";
 
 export function App() {
   const { activeMode, setMode } = useEditorStore();
@@ -22,6 +25,7 @@ export function App() {
             <span>Landscape planning editor</span>
           </div>
         </div>
+        <TerrainSetupPanel />
         <LayerPanel />
       </aside>
 
@@ -100,7 +104,7 @@ function LayerPanel() {
 }
 
 function AreaInspector() {
-  const { selectedArea } = useEditorStore();
+  const { project, selectedArea, terrain } = useEditorStore();
 
   if (!selectedArea) {
     return (
@@ -137,6 +141,20 @@ function AreaInspector() {
         <div>
           <dt>Confidence</dt>
           <dd>{Math.round(selectedArea.confidence * 100)}%</dd>
+        </div>
+      </dl>
+      <dl className="info-list">
+        <div>
+          <dt>Project CRS</dt>
+          <dd>{project.coordinateReferenceSystem}</dd>
+        </div>
+        <div>
+          <dt>Height Source</dt>
+          <dd>{terrain.elevationProvider}</dd>
+        </div>
+        <div>
+          <dt>Terrain Status</dt>
+          <dd>{terrain.accuracyStatus}</dd>
         </div>
       </dl>
     </section>

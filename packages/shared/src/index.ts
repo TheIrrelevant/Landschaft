@@ -1,9 +1,11 @@
 /*
+ * ---metadata---
  * type: package-source
  * description: Shared geospatial and planning types for Landschaft apps.
- * last-updated: 2026-06-24
+ * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: added first shared type contracts
+ * last-change: added terrain import workflow contracts
+ * ---end-metadata---
  */
 import { z } from "zod";
 
@@ -26,6 +28,42 @@ export type Coordinate = z.infer<typeof CoordinateSchema>;
 export type Coordinate3 = z.infer<typeof Coordinate3Schema>;
 export type Ring = z.infer<typeof RingSchema>;
 export type CodedArea = z.infer<typeof CodedAreaSchema>;
+
+export type TerrainAccuracyStatus =
+  | "survey-grade"
+  | "external-dem"
+  | "conceptual"
+  | "flat";
+
+export interface OrthophotoCorner {
+  label: "NW" | "NE" | "SE" | "SW";
+  latitude: number;
+  longitude: number;
+}
+
+export interface ProjectMetadata {
+  id: string;
+  name: string;
+  coordinateReferenceSystem: string;
+  sourceImageName?: string;
+  corners: OrthophotoCorner[];
+  realWorldExtentMeters: {
+    width: number;
+    depth: number;
+  };
+}
+
+export interface TerrainModel {
+  accuracyStatus: TerrainAccuracyStatus;
+  elevationProvider: string;
+  gridSize: number;
+  width: number;
+  depth: number;
+  minElevation: number;
+  maxElevation: number;
+  heightmap: number[];
+  generatedAt: string;
+}
 
 export type PlanningLayerKind =
   | "terrain"

@@ -1,9 +1,11 @@
 /*
+ * ---metadata---
  * type: app-style
  * description: Core styles for the Landschaft web editor shell.
- * last-updated: 2026-06-24
+ * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: added initial responsive editor layout
+ * last-change: added checkpoint 1 terrain setup controls
+ * ---end-metadata---
  */
 :root {
   color: #1e241d;
@@ -29,6 +31,10 @@ input {
   font: inherit;
 }
 
+button {
+  cursor: pointer;
+}
+
 .editor-shell {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 320px;
@@ -44,6 +50,9 @@ input {
 
 .sidebar {
   border-width: 0 1px 0 0;
+  display: grid;
+  gap: 18px;
+  align-content: start;
   padding: 18px;
 }
 
@@ -56,7 +65,6 @@ input {
   align-items: center;
   display: flex;
   gap: 10px;
-  margin-bottom: 22px;
 }
 
 .brand strong,
@@ -93,10 +101,10 @@ input {
 }
 
 .segmented-control button,
-.primary-action {
+.primary-action,
+.secondary-action {
   border: 0;
   border-radius: 6px;
-  cursor: pointer;
 }
 
 .segmented-control button {
@@ -116,6 +124,12 @@ input {
   color: #ffffff;
   display: flex;
   gap: 8px;
+  padding: 9px 12px;
+}
+
+.secondary-action {
+  background: #263323;
+  color: #ffffff;
   padding: 9px 12px;
 }
 
@@ -141,6 +155,76 @@ input {
   gap: 12px;
 }
 
+.terrain-setup {
+  border-bottom: 1px solid #dbe3d4;
+  padding-bottom: 18px;
+}
+
+.file-control {
+  align-items: center;
+  background: #edf3e8;
+  border: 1px dashed #a9b8a0;
+  border-radius: 8px;
+  color: #33422f;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  position: relative;
+}
+
+.file-control span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-control input {
+  inset: 0;
+  opacity: 0;
+  position: absolute;
+}
+
+.corner-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.corner-card {
+  border: 1px solid #dbe3d4;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+  padding: 10px;
+}
+
+.corner-card legend {
+  color: #65705f;
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+.corner-card label {
+  display: grid;
+  gap: 3px;
+}
+
+.corner-card span {
+  color: #65705f;
+  font-size: 11px;
+}
+
+.corner-card input {
+  border: 1px solid #cbd6c4;
+  border-radius: 6px;
+  min-width: 0;
+  padding: 6px;
+  width: 100%;
+}
+
 .layer-row {
   border: 1px solid #dbe3d4;
   border-radius: 8px;
@@ -161,18 +245,36 @@ input {
   margin: 0;
 }
 
-.info-list div {
+.status-list {
+  background: #f0f4ec;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+}
+
+.info-list div,
+.status-list div {
   border-bottom: 1px solid #e1e7dc;
   padding-bottom: 10px;
 }
 
-.info-list dt {
+.info-list div:last-child,
+.status-list div:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.info-list dt,
+.status-list dt {
   color: #65705f;
   font-size: 12px;
   margin-bottom: 3px;
 }
 
-.info-list dd {
+.info-list dd,
+.status-list dd {
   margin: 0;
 }
 

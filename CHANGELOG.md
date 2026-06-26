@@ -1,12 +1,24 @@
 ---
 type: changelog
 description: Release history for the Landschaft landscape planning editor.
-last-updated: 2026-06-25
-last-model: codex-gpt-5
-last-change: added initial project changelog
+last-updated: 2026-06-26
+last-model: amelia(claude-opus-4-8)
+last-change: logged WebGPU viewer, solid terrain, real-metre coordinate space
 ---
 
 # Changelog
+
+## 0.2.0 - 2026-06-26
+
+- Migrated the 3D viewer to WebGPU (`three/webgpu` `WebGPURenderer`) with ACES tone mapping; bumped `three` to 0.184.
+- Replaced the flat terrain sheet with a solid carved block (top surface, side walls, base cap) plus a ground shadow catcher.
+- Added true 3D isohypse (contour) lines extracted from the heightmap with marching squares so they sit on the surface.
+- Adopted an AutoCAD-style coordinate space: data stays in real metres, a single uniform `displayScale` maps to scene units, scene origin is the terrain centre.
+- Added a single neutral "sun" lighting model (one directional light + colourless grey sky fill) so the editor stays neutral and map layers own all colour.
+- Gave the terrain two materials: a matte felt top surface and a neutral textured solid-terrain side that will recolour from data later.
+- Added a fixed infinite ground reference plane with a metre-based crosshair grid.
+- Added a top-right viewport overlay with live FPS and a Fit / 1:1 view-scale toggle; camera and zoom limits anchored to a fixed reference span.
+- Split the editor shell into LandschaftLogo, LayersPanel, UserPanel, ViewportOverlay components and modular CSS.
 
 ## 0.1.0 - 2026-06-25
 

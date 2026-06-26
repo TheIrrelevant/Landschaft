@@ -1,0 +1,205 @@
+/*
+ * ---metadata---
+ * type: app-style
+ * description: Canvas, view switcher, and right-side inspector tab styles.
+ * last-updated: 2026-06-25
+ * last-model: cursor-composer
+ * last-change: top-right viewport overlay (fps + view scale)
+ * ---end-metadata---
+ */
+.canvas-area {
+  background: #ebebea;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+
+.viewport-overlay {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  z-index: 3;
+}
+
+.viewport-stat,
+.viewport-scale {
+  align-items: center;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-inset), var(--control-shadow);
+  display: flex;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+}
+
+.viewport-stat-label {
+  color: var(--color-text-secondary);
+  font-size: 10.5px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.viewport-stat-value {
+  color: var(--color-text-primary);
+  font-feature-settings: "tnum" 1;
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  min-width: 26px;
+  text-align: right;
+}
+
+.viewport-scale button {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  padding: 5px 9px;
+}
+
+.viewport-scale button.active {
+  background: linear-gradient(
+    180deg,
+    var(--color-control-active) 0%,
+    var(--color-control-active-deep) 100%
+  );
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-pressed), var(--shadow-inset);
+  color: #ffffff;
+}
+
+.canvas-area canvas {
+  display: block;
+  height: 100% !important;
+  width: 100% !important;
+}
+
+.view-toggle {
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-inset), var(--control-shadow);
+  display: flex;
+  gap: 4px;
+  left: 28px;
+  padding: 5px;
+  position: absolute;
+  top: 28px;
+  z-index: 2;
+}
+
+.view-toggle button {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
+  color: var(--color-text-primary);
+  font-size: 13.5px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: -0.01em;
+  line-height: 1;
+  min-height: 32px;
+  padding: 8px 15px;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease;
+}
+
+.view-toggle button:hover:not(.active) {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border-strong);
+}
+
+.view-toggle button.active {
+  background: linear-gradient(
+    180deg,
+    var(--color-control-active) 0%,
+    var(--color-control-active-deep) 100%
+  );
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-pressed), var(--shadow-inset);
+  color: #ffffff;
+}
+
+.inspector-tab {
+  align-items: center;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  border-right: 0;
+  box-shadow: var(--shadow-outer-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 9px 16px;
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  transition:
+    background 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+  z-index: 2;
+}
+
+.inspector-tab:hover {
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-outer);
+  transform: translateY(-50%) translateX(-1px);
+}
+
+.inspector-tab:active {
+  box-shadow: var(--shadow-outer-sm);
+  transform: translateY(-50%) translateX(0);
+}
+
+.inspector-tab-icon {
+  align-items: center;
+  color: var(--color-text-secondary);
+  display: flex;
+  justify-content: center;
+}
+
+.inspector-tab-label {
+  font-size: 12.5px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-orientation: mixed;
+  writing-mode: vertical-rl;
+}
+
+@media (max-width: 920px) {
+  .canvas-area {
+    height: 52vh;
+  }
+
+  .view-toggle {
+    left: 18px;
+    top: 18px;
+  }
+
+  .view-toggle button {
+    font-size: 13px;
+    min-height: 30px;
+    padding: 7px 12px;
+  }
+
+  .inspector-tab {
+    padding: 12px 8px 14px;
+  }
+}

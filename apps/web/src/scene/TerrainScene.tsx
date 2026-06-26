@@ -2,98 +2,639 @@
  * ---metadata---
  * type: app-source
  * description: Three.js terrain preview scene for the Landschaft editor.
- * last-updated: 2026-06-25
- * last-model: codex-gpt-5
- * last-change: keep default canvas empty until terrain is generated
+ * last-updated: 2026-06-26
+ * last-model: amelia(claude-opus-4-8)
+ * last-change: real-metre coordinate space with uniform displayScale (AutoCAD model)
  * ---end-metadata---
  */
-import { Grid, OrbitControls } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
-import { useEffect, useMemo, useState } from "react";
-import { DoubleSide, PlaneGeometry, Texture, TextureLoader } from "three";
+import { OrbitControls } from "@react-three/drei";
+import {
+  Canvas,
+  extend,
+  type ThreeToJSXElements,
+  useThree
+} from "@react-three/fiber";
+import { useEffect, useMemo } from "react";
+import {
+  ACESFilmicToneMapping,
+  BufferGeometry,
+  CanvasTexture,
+  Color,
+  DoubleSide,
+  Float32BufferAttribute,
+  RepeatWrapping,
+  SRGBColorSpace
+} from "three";
+import * as THREE from "three/webgpu";
+import type { TerrainModel } from "@landschaft/shared";
 import { useEditorStore } from "../state/editorStore";
 
-function TerrainPlane() {
-  const { orthophotoPreviewUrl, terrain } = useEditorStore();
-  const [texture, setTexture] = useState<Texture | null>(null);
-  const sceneScale = Math.max(terrain.width, terrain.depth, 1) / 80;
-  const width = terrain.width / sceneScale;
-  const depth = terrain.depth / sceneScale;
-  const elevationRange = Math.max(terrain.maxElevation - terrain.minElevation, 1);
+declare module "@react-three/fiber" {
+  // Required declaration-merge so R3F JSX knows the three/webgpu element types.
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  interface ThreeElements extends ThreeToJSXElements<typeof THREE> {}
+}
 
-  const geometry = useMemo(() => {
-    const plane = new PlaneGeometry(
-      width,
-      depth,
-      terrain.gridSize - 1,
-      terrain.gridSize - 1
-    );
-    const positions = plane.attributes.position;
+extend(THREE as unknown as Parameters<typeof extend>[0]);
 
-    for (let index = 0; index < positions.count; index += 1) {
-      const elevation = terrain.heightmap[index] ?? terrain.minElevation;
-      const normalizedElevation =
-        (elevation - terrain.minElevation) / elevationRange;
+const WEBGPU_RENDERER_CACHE = new WeakMap<
+  HTMLCanvasElement,
+  Promise<THREE.WebGPURenderer>
+>();
 
-      positions.setZ(index, normalizedElevation * 8);
-    }
+function createWebGPURenderer(props: { canvas?: HTMLCanvasElement }) {
+  const canvas = props.canvas;
+  const cached = canvas ? WEBGPU_RENDERER_CACHE.get(canvas) : undefined;
+  if (cached) {
+    return cached;
+  }
 
-    positions.needsUpdate = true;
-    plane.computeVertexNormals();
-
-    return plane;
-  }, [depth, elevationRange, terrain, width]);
-
-  useEffect(() => {
-    if (!orthophotoPreviewUrl) {
-      setTexture(null);
-      return;
-    }
-
-    const loader = new TextureLoader();
-    loader.load(orthophotoPreviewUrl, (loadedTexture) => {
-      setTexture(loadedTexture);
+  const promise = (async () => {
+    const renderer = new THREE.WebGPURenderer({
+      ...(props as ConstructorParameters<typeof THREE.WebGPURenderer>[0]),
+      antialias: true
     });
+    renderer.toneMapping = ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.9;
+    await renderer.init();
+    return renderer;
+  })();
 
-    return () => {
-      setTexture((currentTexture) => {
-        currentTexture?.dispose();
-        return null;
-      });
-    };
-  }, [orthophotoPreviewUrl]);
+  if (canvas) {
+    WEBGPU_RENDERER_CACHE.set(canvas, promise);
+  }
+
+  return promise;
+}
+
+const VIEW_BACKGROUND = "#f2f2f2";
+const GROUND_COLOR = "#ededed";
+const TERRAIN_CLAY = "#d4d4d4";
+const SOLID_TERRAIN_COLOR = "#cccccc";
+const CONTOUR_COLOR = "#969696";
+// Target scene span (world units) the terrain is fitted into by default. The
+// underlying data stays in true metres; displayScale only affects presentation.
+// 1:1 viewing = override displayScale to 1.
+const TARGET_SCENE_SPAN = 40;
+const CONTOUR_LEVELS = 14;
+const CONTOUR_LIFT = 0.012;
+// Solid base depth BELOW the terrain, expressed in real metres (scaled by
+// displayScale into the scene). ~40 m of "geological block" under the lowest
+// point reads as a carved model.
+const BASE_DEPTH_METERS = 40;
+
+/**
+ * The terrain coordinate space.
+ *
+ * DATA stays in true metres (terrain.width/depth/elevation). `displayScale` is a
+ * single uniform factor (horizontal == vertical, so proportions are never
+ * distorted) that maps metres -> scene units. By default it fits the terrain
+ * into TARGET_SCENE_SPAN so very large maps don't produce a huge scene; set it
+ * to 1 for true 1:1 viewing. Scene origin (0,0) is the terrain centre.
+ */
+type TerrainSpace = {
+  /** metres -> scene-units factor (uniform on all axes) */
+  displayScale: number;
+  /** terrain footprint in scene units */
+  sizeX: number;
+  sizeZ: number;
+  /** elevation span in metres */
+  rangeMeters: number;
+  /** lowest surface point in scene units (terrain min is lifted to y=0) */
+  baseY: number;
+};
+
+function getTerrainSpace(terrain: TerrainModel, scaleOverride?: number): TerrainSpace {
+  const maxMeters = Math.max(terrain.width, terrain.depth, 1);
+  const displayScale = scaleOverride ?? TARGET_SCENE_SPAN / maxMeters;
+  const rangeMeters = Math.max(terrain.maxElevation - terrain.minElevation, 0.01);
+
+  return {
+    displayScale,
+    sizeX: terrain.width * displayScale,
+    sizeZ: terrain.depth * displayScale,
+    rangeMeters,
+    baseY: -BASE_DEPTH_METERS * displayScale
+  };
+}
+
+type Vec3 = [number, number, number];
+
+/**
+ * Build a solid terrain block in local y-up space: heightmap top surface, four
+ * side walls (skirts) dropping to a flat base, and a base cap. Shares
+ * gridToLocal space with the contour lines. We rely on FrontSide + outward
+ * winding for the walls/base, and computeVertexNormals for smooth top shading.
+ */
+function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
+  const grid = terrain.gridSize;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const baseY = space.baseY;
+
+  const top = (gx: number, gy: number): Vec3 =>
+    gridToLocal(gx, gy, cellHeight(terrain, space, gy * grid + gx), terrain, space);
+  const bottom = (gx: number, gy: number): Vec3 => {
+    const t = gridToLocal(gx, gy, 0, terrain, space);
+    return [t[0], baseY, t[2]];
+  };
+  // tri pushes one triangle with its three UVs.
+  const tri = (
+    a: Vec3,
+    b: Vec3,
+    c: Vec3,
+    uvA: [number, number],
+    uvB: [number, number],
+    uvC: [number, number]
+  ) => {
+    positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    uvs.push(uvA[0], uvA[1], uvB[0], uvB[1], uvC[0], uvC[1]);
+  };
+
+  const last = grid - 1;
+  const gridUv = (gx: number, gy: number): [number, number] => [gx / last, gy / last];
+
+  // --- GROUP 0: Top surface (fabric) ---
+  let topTriCount = 0;
+  for (let gy = 0; gy < last; gy += 1) {
+    for (let gx = 0; gx < last; gx += 1) {
+      const a = top(gx, gy);
+      const b = top(gx + 1, gy);
+      const c = top(gx + 1, gy + 1);
+      const d = top(gx, gy + 1);
+      const ua = gridUv(gx, gy);
+      const ub = gridUv(gx + 1, gy);
+      const uc = gridUv(gx + 1, gy + 1);
+      const ud = gridUv(gx, gy + 1);
+      tri(a, c, b, ua, uc, ub);
+      tri(a, d, c, ua, ud, uc);
+      topTriCount += 2;
+    }
+  }
+
+  // --- GROUP 1: Side walls + base (solid terrain) ---
+  // Wall UVs span horizontal position (u) and vertical 0..1 (top=1, bottom=0).
+  const wallTop: [number, number] = [0, 1];
+  const wallBot: [number, number] = [0, 0];
+
+  // North edge (gy = 0): faces -z.
+  for (let gx = 0; gx < last; gx += 1) {
+    const tA = top(gx, 0);
+    const tB = top(gx + 1, 0);
+    const bA = bottom(gx, 0);
+    const bB = bottom(gx + 1, 0);
+    tri(tA, bA, bB, wallTop, wallBot, wallBot);
+    tri(tA, bB, tB, wallTop, wallBot, wallTop);
+  }
+  // South edge (gy = last): faces +z.
+  for (let gx = 0; gx < last; gx += 1) {
+    const tA = top(gx, last);
+    const tB = top(gx + 1, last);
+    const bA = bottom(gx, last);
+    const bB = bottom(gx + 1, last);
+    tri(tA, tB, bB, wallTop, wallTop, wallBot);
+    tri(tA, bB, bA, wallTop, wallBot, wallBot);
+  }
+  // West edge (gx = 0): faces -x.
+  for (let gy = 0; gy < last; gy += 1) {
+    const tA = top(0, gy);
+    const tB = top(0, gy + 1);
+    const bA = bottom(0, gy);
+    const bB = bottom(0, gy + 1);
+    tri(tA, tB, bB, wallTop, wallTop, wallBot);
+    tri(tA, bB, bA, wallTop, wallBot, wallBot);
+  }
+  // East edge (gx = last): faces +x.
+  for (let gy = 0; gy < last; gy += 1) {
+    const tA = top(last, gy);
+    const tB = top(last, gy + 1);
+    const bA = bottom(last, gy);
+    const bB = bottom(last, gy + 1);
+    tri(tA, bA, bB, wallTop, wallBot, wallBot);
+    tri(tA, bB, tB, wallTop, wallBot, wallTop);
+  }
+
+  // Base cap at baseY — faces down.
+  const c00 = bottom(0, 0);
+  const c10 = bottom(last, 0);
+  const c11 = bottom(last, last);
+  const c01 = bottom(0, last);
+  tri(c00, c10, c11, wallBot, wallBot, wallBot);
+  tri(c00, c11, c01, wallBot, wallBot, wallBot);
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+  geometry.computeVertexNormals();
+
+  const totalTris = positions.length / 9;
+  // Group 0 = fabric top, group 1 = solid terrain sides/base.
+  geometry.addGroup(0, topTriCount * 3, 0);
+  geometry.addGroup(topTriCount * 3, (totalTris - topTriCount) * 3, 1);
+
+  return geometry;
+}
+
+/**
+ * Map a grid cell (gx, gy) + a scene-unit height into local scene space.
+ * Terrain is centred on (0,0): plane-X -> scene-X, grid-row -> scene-Z. Sizes
+ * are already metres * displayScale, so this places contour lines and the mesh
+ * in the exact same space.
+ */
+function gridToLocal(
+  gx: number,
+  gy: number,
+  height: number,
+  terrain: TerrainModel,
+  space: TerrainSpace
+): [number, number, number] {
+  const grid = terrain.gridSize;
+  const u = gx / (grid - 1);
+  const v = gy / (grid - 1);
+  const x = (u - 0.5) * space.sizeX;
+  const z = (v - 0.5) * space.sizeZ;
+  return [x, height, z];
+}
+
+/**
+ * Surface height for a cell, in scene units. Real elevation above the terrain
+ * minimum (metres) scaled uniformly by displayScale — same factor as the
+ * horizontal axes, so vertical proportions are true (no exaggeration).
+ */
+function cellHeight(terrain: TerrainModel, space: TerrainSpace, index: number) {
+  const elevation = terrain.heightmap[index] ?? terrain.minElevation;
+  return (elevation - terrain.minElevation) * space.displayScale;
+}
+
+/**
+ * Extract isohypse (contour) line segments from the heightmap using marching
+ * squares. For each grid cell we look at its 4 corner heights, and for each
+ * contour level that passes through the cell we emit a line segment by linearly
+ * interpolating the crossing points along the cell edges. Segments are produced
+ * directly in local scene space so they sit on the 3D surface.
+ */
+function buildContourGeometry(terrain: TerrainModel, space: TerrainSpace) {
+  const grid = terrain.gridSize;
+  const positions: number[] = [];
+
+  // Surface spans y = 0 (terrain min) .. rangeMeters * displayScale (terrain max).
+  const surfaceMax = space.rangeMeters * space.displayScale;
+  const step = surfaceMax / (CONTOUR_LEVELS + 1);
+  const lift = CONTOUR_LIFT * Math.max(space.displayScale, 0.0001) * 50;
+
+  for (let level = 1; level <= CONTOUR_LEVELS; level += 1) {
+    const threshold = step * level;
+
+    for (let gy = 0; gy < grid - 1; gy += 1) {
+      for (let gx = 0; gx < grid - 1; gx += 1) {
+        const i00 = gy * grid + gx;
+        const i10 = gy * grid + (gx + 1);
+        const i01 = (gy + 1) * grid + gx;
+        const i11 = (gy + 1) * grid + (gx + 1);
+
+        const h00 = cellHeight(terrain, space, i00);
+        const h10 = cellHeight(terrain, space, i10);
+        const h01 = cellHeight(terrain, space, i01);
+        const h11 = cellHeight(terrain, space, i11);
+
+        // Corner positions in grid coords: TL(gx,gy) TR(gx+1,gy) BL(gx,gy+1) BR(gx+1,gy+1)
+        const crossings: Array<[number, number]> = [];
+
+        // top edge: TL -> TR
+        pushEdgeCrossing(crossings, threshold, gx, gy, h00, gx + 1, gy, h10);
+        // right edge: TR -> BR
+        pushEdgeCrossing(crossings, threshold, gx + 1, gy, h10, gx + 1, gy + 1, h11);
+        // bottom edge: BR -> BL
+        pushEdgeCrossing(crossings, threshold, gx + 1, gy + 1, h11, gx, gy + 1, h01);
+        // left edge: BL -> TL
+        pushEdgeCrossing(crossings, threshold, gx, gy + 1, h01, gx, gy, h00);
+
+        // Connect crossings pairwise into segments (2 crossings = 1 line).
+        for (let c = 0; c + 1 < crossings.length; c += 2) {
+          const a = crossings[c];
+          const b = crossings[c + 1];
+          const pa = gridToLocal(a[0], a[1], threshold + lift, terrain, space);
+          const pb = gridToLocal(b[0], b[1], threshold + lift, terrain, space);
+          positions.push(pa[0], pa[1], pa[2], pb[0], pb[1], pb[2]);
+        }
+      }
+    }
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  return geometry;
+}
+
+function pushEdgeCrossing(
+  out: Array<[number, number]>,
+  threshold: number,
+  ax: number,
+  ay: number,
+  ah: number,
+  bx: number,
+  by: number,
+  bh: number
+) {
+  const aAbove = ah >= threshold;
+  const bAbove = bh >= threshold;
+  if (aAbove === bAbove) {
+    return;
+  }
+
+  const t = (threshold - ah) / (bh - ah);
+  out.push([ax + (bx - ax) * t, ay + (by - ay) * t]);
+}
+
+function createFeltTexture() {
+  const size = 1024;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+
+  ctx.fillStyle = "#ebebeb";
+  ctx.fillRect(0, 0, size, size);
+
+  // Felt = many soft, overlapping low-contrast fibre dabs (not single-pixel
+  // noise, which reads as dirt). Short translucent strokes in random directions
+  // build a woolly, matte textile surface.
+  const strokes = 26000;
+  for (let i = 0; i < strokes; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const angle = Math.random() * Math.PI;
+    const len = 3 + Math.random() * 6;
+    const dark = Math.random() > 0.5;
+    ctx.strokeStyle = dark
+      ? "rgba(150,150,150,0.05)"
+      : "rgba(255,255,255,0.06)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(angle) * len, y + Math.sin(angle) * len);
+    ctx.stroke();
+  }
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.repeat.set(3, 3);
+  texture.anisotropy = 4;
+  return texture;
+}
+
+function createSolidTerrainTexture() {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+
+  ctx.fillStyle = "#cfcfcf";
+  ctx.fillRect(0, 0, size, size);
+
+  // Fine granular speckle to read as a solid extruded mass (neutral, no colour).
+  const grain = ctx.getImageData(0, 0, size, size);
+  for (let i = 0; i < grain.data.length; i += 4) {
+    const n = (Math.random() - 0.5) * 22;
+    grain.data[i] += n;
+    grain.data[i + 1] += n;
+    grain.data[i + 2] += n;
+  }
+  ctx.putImageData(grain, 0, 0);
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.repeat.set(6, 2);
+  texture.anisotropy = 4;
+  return texture;
+}
+
+function TerrainMesh({ terrain, space }: { terrain: TerrainModel; space: TerrainSpace }) {
+  const geometry = useMemo(() => buildTerrainGeometry(terrain, space), [terrain, space]);
+  const materials = useMemo(() => {
+    const topSurface = new THREE.MeshLambertNodeMaterial({
+      color: new Color(TERRAIN_CLAY),
+      map: createFeltTexture(),
+      side: DoubleSide
+    });
+    const solid = new THREE.MeshLambertNodeMaterial({
+      color: new Color(SOLID_TERRAIN_COLOR),
+      map: createSolidTerrainTexture(),
+      side: DoubleSide
+    });
+    return [topSurface, solid];
+  }, []);
 
   return (
-    <mesh geometry={geometry} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-      <meshStandardMaterial
-        color={texture ? "#ffffff" : "#6f8f69"}
-        map={texture}
-        metalness={0}
-        roughness={0.92}
-        side={DoubleSide}
+    <mesh castShadow geometry={geometry} material={materials} receiveShadow />
+  );
+}
+
+function ContourLines({ terrain, space }: { terrain: TerrainModel; space: TerrainSpace }) {
+  const geometry = useMemo(() => buildContourGeometry(terrain, space), [terrain, space]);
+
+  return (
+    <lineSegments geometry={geometry}>
+      <lineBasicMaterial color={CONTOUR_COLOR} transparent opacity={0.6} />
+    </lineSegments>
+  );
+}
+
+// Very large fixed ground so it reads as an infinite reference plane that does
+// NOT scale with the terrain / view mode.
+const GROUND_PLANE_SIZE = 20000;
+// One grid cell = this many scene units (a cell repeats across the plane).
+const GROUND_CELL_SIZE = 4;
+
+function createCrosshairGroundTexture() {
+  const cell = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = cell;
+  canvas.height = cell;
+  const ctx = canvas.getContext("2d")!;
+
+  ctx.fillStyle = GROUND_COLOR;
+  ctx.fillRect(0, 0, cell, cell);
+
+  // Faint cell grid lines along two edges.
+  ctx.strokeStyle = "rgba(150,150,150,0.14)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cell - 0.5, 0);
+  ctx.lineTo(cell - 0.5, cell);
+  ctx.moveTo(0, cell - 0.5);
+  ctx.lineTo(cell, cell - 0.5);
+  ctx.stroke();
+
+  // Small crosshair "+" at the cell corner.
+  const arm = 5;
+  ctx.strokeStyle = "rgba(130,130,130,0.4)";
+  ctx.beginPath();
+  ctx.moveTo(cell - arm, cell - 0.5);
+  ctx.lineTo(cell + arm, cell - 0.5);
+  ctx.moveTo(cell - 0.5, cell - arm);
+  ctx.lineTo(cell - 0.5, cell + arm);
+  ctx.stroke();
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.repeat.set(
+    GROUND_PLANE_SIZE / GROUND_CELL_SIZE,
+    GROUND_PLANE_SIZE / GROUND_CELL_SIZE
+  );
+  texture.anisotropy = 4;
+  return texture;
+}
+
+function GroundPlane({ baseY }: { baseY: number }) {
+  const gridMap = useMemo(() => createCrosshairGroundTexture(), []);
+
+  return (
+    <group position={[0, baseY - 0.01, 0]}>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[GROUND_PLANE_SIZE, GROUND_PLANE_SIZE]} />
+        <meshBasicNodeMaterial color={new Color(GROUND_COLOR)} map={gridMap} />
+      </mesh>
+      <mesh position={[0, 0.005, 0]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[GROUND_PLANE_SIZE, GROUND_PLANE_SIZE]} />
+        <shadowMaterial opacity={0.22} transparent />
+      </mesh>
+    </group>
+  );
+}
+
+function TerrainContent() {
+  const terrain = useEditorStore((state) => state.terrain);
+  const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
+  const space = useMemo(
+    () => getTerrainSpace(terrain, viewScaleMode === "1:1" ? 1 : undefined),
+    [terrain, viewScaleMode]
+  );
+
+  return (
+    <>
+      <GroundPlane baseY={space.baseY} />
+      <TerrainMesh terrain={terrain} space={space} />
+      <ContourLines terrain={terrain} space={space} />
+    </>
+  );
+}
+
+/**
+ * Re-frames the camera whenever the camera target/limits change (e.g. switching
+ * Fit <-> 1:1), since R3F only reads the <Canvas camera> prop on first mount.
+ */
+function CameraRig({
+  far,
+  near,
+  position
+}: {
+  far: number;
+  near: number;
+  position: [number, number, number];
+}) {
+  const camera = useThree((state) => state.camera);
+
+  useEffect(() => {
+    camera.position.set(position[0], position[1], position[2]);
+    if ("far" in camera) {
+      camera.far = far;
+      camera.near = near;
+      camera.updateProjectionMatrix();
+    }
+    camera.lookAt(0, 0, 0);
+  }, [camera, far, near, position]);
+
+  return null;
+}
+
+/**
+ * Single "sun" lighting model. One strong directional light drives all shading
+ * and shadows. A neutral grey hemisphere + faint ambient act as a colourless
+ * sky-dome fill so shadowed faces are not pure black — but they add NO colour,
+ * keeping the editor neutral so map layers own all colour.
+ */
+function SceneLights() {
+  return (
+    <>
+      <ambientLight color="#ffffff" intensity={0.28} />
+      <hemisphereLight color="#e2e2e2" groundColor="#b4b4b4" intensity={0.7} />
+      <directionalLight
+        castShadow
+        color="#ffffff"
+        intensity={3.0}
+        position={[22, 48, 18]}
+        shadow-bias={-0.002}
+        shadow-camera-bottom={-60}
+        shadow-camera-far={200}
+        shadow-camera-left={-60}
+        shadow-camera-right={60}
+        shadow-camera-top={60}
+        shadow-mapSize-height={2048}
+        shadow-mapSize-width={2048}
+        shadow-normalBias={0.3}
+        shadow-radius={2}
       />
-    </mesh>
+    </>
   );
 }
 
 export function TerrainScene() {
   const terrainGenerated = useEditorStore((state) => state.terrainGenerated);
 
+  // The camera is anchored to a FIXED reference span (TARGET_SCENE_SPAN), not to
+  // the terrain's current scene size. In "fit" mode the terrain is scaled into
+  // that span so it frames perfectly; in "1:1" mode the terrain keeps its true
+  // metre size and therefore overflows the frame — you feel the real scale, like
+  // switching to 1:1 in AutoCAD. far/near stay generous so 1:1 never clips.
+  const { camStart, controls } = useMemo(() => {
+    const ref = TARGET_SCENE_SPAN;
+    const dist = ref * 1.15;
+    return {
+      camStart: [dist * 0.8, dist * 0.66, dist * 0.8] as [number, number, number],
+      controls: {
+        far: ref * 400,
+        near: ref / 200,
+        minDistance: ref * 0.12,
+        maxDistance: ref * 60
+      }
+    };
+  }, []);
+
   return (
-    <Canvas camera={{ position: [34, 34, 34], fov: 42 }} shadows>
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[18, 28, 12]} intensity={1.2} castShadow />
-      {terrainGenerated ? <TerrainPlane /> : null}
-      <Grid
-        args={[80, 80]}
-        cellColor="#d6dfd0"
-        cellSize={2}
-        fadeDistance={90}
-        fadeStrength={1}
-        sectionColor="#ffffff"
-        sectionSize={10}
+    <Canvas
+      camera={{
+        far: controls.far,
+        fov: 27,
+        near: controls.near,
+        position: camStart
+      }}
+      dpr={[1, 1.5]}
+      gl={createWebGPURenderer as unknown as undefined}
+      shadows
+    >
+      <color attach="background" args={[new Color(VIEW_BACKGROUND)]} />
+      <CameraRig far={controls.far} near={controls.near} position={camStart} />
+      <SceneLights />
+      {terrainGenerated ? <TerrainContent /> : null}
+      <OrbitControls
+        dampingFactor={0.06}
+        enableDamping
+        enablePan={false}
+        makeDefault
+        maxDistance={controls.maxDistance}
+        maxPolarAngle={Math.PI / 2.35}
+        minDistance={controls.minDistance}
+        minPolarAngle={0.52}
+        target={[0, 0, 0]}
       />
-      <OrbitControls makeDefault enableDamping />
     </Canvas>
   );
 }

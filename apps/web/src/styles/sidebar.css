@@ -1,0 +1,394 @@
+/*
+ * ---metadata---
+ * type: app-style
+ * description: Sidebar, orthophoto setup, and user panel styles for the Landschaft editor.
+ * last-updated: 2026-06-25
+ * last-model: cursor-composer
+ * last-change: design system tokens applied across sidebar surfaces and controls
+ * ---end-metadata---
+ */
+.sidebar {
+  background: var(--color-bg-surface);
+  border-right: 1px solid var(--color-border);
+  box-shadow: var(--shadow-panel);
+  color: var(--color-text-primary);
+  min-height: 0;
+  position: relative;
+}
+
+.sidebar-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100vh;
+  overflow: hidden;
+  padding: 0;
+}
+
+.sidebar-collapsed .sidebar-content {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-toggle {
+  align-items: center;
+  background: linear-gradient(
+    180deg,
+    var(--color-control-active) 0%,
+    var(--color-control-active-deep) 100%
+  );
+  border: 1px solid var(--color-border-strong);
+  border-left: 0;
+  border-radius: 0 var(--radius-xl) var(--radius-xl) 0;
+  box-shadow: var(--shadow-outer-sm);
+  color: #ffffff;
+  display: flex;
+  height: 84px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: -30px;
+  top: 76px;
+  width: 30px;
+  z-index: 5;
+}
+
+.brand {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  gap: 12px;
+  height: 68px;
+  min-width: 0;
+  padding: 0 24px;
+}
+
+.brand strong {
+  color: var(--color-text-primary);
+  font-size: 20px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.landschaft-logo {
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+}
+
+.terrain-setup {
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  display: grid;
+  flex: 0 0 auto;
+  gap: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 18px 24px 20px;
+}
+
+.terrain-setup-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.section-title {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-primary);
+  display: flex;
+  font-size: 15px;
+  font-weight: var(--font-weight-medium);
+  gap: 12px;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.section-title-leading {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+}
+
+.section-title-leading svg {
+  color: var(--color-text-secondary);
+}
+
+.file-control {
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  min-height: 112px;
+  min-width: 0;
+  padding: 18px 16px 16px;
+  position: relative;
+}
+
+.file-control svg {
+  color: var(--color-text-secondary);
+  margin-bottom: 2px;
+}
+
+.file-control strong {
+  font-size: 15px;
+  font-weight: var(--font-weight-medium);
+}
+
+.file-control span {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: var(--font-weight-regular);
+}
+
+.file-control input {
+  cursor: pointer;
+  inset: 0;
+  opacity: 0;
+  position: absolute;
+}
+
+.upload-note,
+.terrain-summary {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: var(--font-weight-regular);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.coordinate-step {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
+  display: grid;
+  gap: 10px;
+  padding: 12px 12px 11px;
+}
+
+.coordinate-step.disabled {
+  opacity: 0.94;
+}
+
+.step-badge {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  justify-self: start;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.step-label {
+  color: var(--color-text-primary);
+  font-size: 13.5px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.2;
+  margin: 0;
+}
+
+.coordinate-fields {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.coordinate-fields input {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset-soft);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-regular);
+  min-height: 34px;
+  min-width: 0;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+.coordinate-fields input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.coordinate-fields input:disabled {
+  background: var(--color-bg-base);
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+}
+
+.secondary-action {
+  align-items: center;
+  background: linear-gradient(
+    180deg,
+    var(--color-control-active) 0%,
+    var(--color-control-active-deep) 100%
+  );
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset), var(--shadow-pressed), var(--shadow-outer-sm);
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  gap: 6px;
+  justify-content: center;
+  justify-self: end;
+  min-height: 34px;
+  padding: 0 14px;
+}
+
+.secondary-action span {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.secondary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.82;
+}
+
+.terrain-summary {
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  gap: 8px;
+  padding-top: 9px;
+}
+
+.terrain-summary span {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  padding: 3px 6px;
+}
+
+.user-panel {
+  align-items: center;
+  background: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border);
+  box-shadow: var(--shadow-inset), 0 -4px 14px rgba(32, 32, 32, 0.04);
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  margin-top: auto;
+  min-height: 72px;
+  padding: 18px 22px 20px;
+  position: relative;
+}
+
+.user-panel::before {
+  background:
+    linear-gradient(var(--color-border), var(--color-border)) center 0 / 28px 1px
+      no-repeat,
+    linear-gradient(var(--color-border), var(--color-border)) center 3px / 28px 1px
+      no-repeat;
+  content: "";
+  height: 5px;
+  left: 50%;
+  position: absolute;
+  top: 7px;
+  transform: translateX(-50%);
+  width: 28px;
+}
+
+.user-avatar {
+  align-items: center;
+  background: linear-gradient(160deg, var(--color-bg-muted) 0%, #b8b8b4 100%);
+  border: 1.5px solid var(--color-bg-elevated);
+  border-radius: 50%;
+  box-shadow: var(--shadow-outer-sm), var(--shadow-inset-soft);
+  display: flex;
+  flex-shrink: 0;
+  height: 36px;
+  justify-content: center;
+  overflow: hidden;
+  width: 36px;
+}
+
+.user-avatar-fallback {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 2px rgba(40, 40, 38, 0.22);
+}
+
+.user-name {
+  color: var(--color-text-primary);
+  flex: 1 1 auto;
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-panel-settings {
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: grid;
+  flex-shrink: 0;
+  height: 32px;
+  place-items: center;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease;
+  width: 32px;
+}
+
+.user-panel-settings:hover {
+  background: var(--color-bg-surface);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+.user-panel-settings:active {
+  box-shadow: var(--shadow-pressed);
+}
+
+@media (max-width: 920px) {
+  .sidebar {
+    max-height: 48vh;
+    z-index: 3;
+  }
+
+  .sidebar-content {
+    height: 48vh;
+    overflow: auto;
+  }
+
+  .sidebar-toggle {
+    display: none;
+  }
+
+  .terrain-setup {
+    flex-basis: auto;
+  }
+}

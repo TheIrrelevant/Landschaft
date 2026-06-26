@@ -1,0 +1,74 @@
+/*
+ * ---metadata---
+ * type: app-style
+ * description: Inspector drawer styles for the Landschaft editor.
+ * last-updated: 2026-06-25
+ * last-model: codex-gpt-5
+ * last-change: design system tokens for inspector drawer surfaces
+ * ---end-metadata---
+ */
+.inspector-drawer {
+  background: var(--color-bg-surface);
+  border-left: 1px solid var(--color-border);
+  box-shadow: var(--shadow-panel);
+  color: var(--color-text-primary);
+  display: grid;
+  gap: 14px;
+  min-height: 100vh;
+  padding: 16px;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 320px;
+  z-index: 4;
+}
+
+.inspector-drawer header {
+  align-items: center;
+  display: flex;
+  font-weight: var(--font-weight-medium);
+  justify-content: space-between;
+}
+
+.inspector-drawer button {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset-soft);
+  color: var(--color-text-secondary);
+  display: grid;
+  height: 28px;
+  place-items: center;
+  width: 28px;
+}
+
+.info-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.info-list div {
+  border-bottom: 1px solid var(--color-border);
+  padding: 10px 0;
+}
+
+.info-list dt {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: var(--font-weight-regular);
+  margin-bottom: 3px;
+}
+
+.info-list dd {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-regular);
+  margin: 0;
+}
+
+@media (max-width: 920px) {
+  .inspector-drawer {
+    min-height: 52vh;
+    width: min(320px, 88vw);
+  }
+}

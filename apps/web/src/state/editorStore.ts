@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: added layer reordering and blank default canvas state
+ * last-change: aligned default editor state with v3 reference UI
  * ---end-metadata---
  */
 import type {
@@ -27,6 +27,9 @@ interface EditorState {
   coordinateStep: number | null;
   inspectorOpen: boolean;
   activeMode: "top-view" | "terrain-3d";
+  /** "fit" auto-scales the terrain into the scene; "1:1" shows true metres. */
+  viewScaleMode: "fit" | "1:1";
+  setViewScaleMode: (mode: EditorState["viewScaleMode"]) => void;
   advanceCoordinateStep: () => void;
   closeInspector: () => void;
   generateTerrain: () => void;
@@ -54,8 +57,24 @@ const defaultLayers: PlanningLayer[] = [
     reviewStatus: "draft"
   },
   {
+    id: "terrain-mesh",
+    name: "Terrain Mesh",
+    kind: "terrain",
+    visible: true,
+    opacity: 1,
+    reviewStatus: "draft"
+  },
+  {
+    id: "planning-draft",
+    name: "Planning Draft",
+    kind: "suitability",
+    visible: true,
+    opacity: 1,
+    reviewStatus: "draft"
+  },
+  {
     id: "lca-areas",
-    name: "Landscape Character Areas",
+    name: "Landscape Areas",
     kind: "lca",
     visible: true,
     opacity: 0.72,
@@ -150,11 +169,12 @@ export const useEditorStore = create<EditorState>((set) => ({
   layers: defaultLayers,
   project: initialProject,
   terrain: createTerrain(defaultCorners),
-  terrainGenerated: false,
+  terrainGenerated: true,
   orthophotoPreviewUrl: null,
   coordinateStep: null,
   inspectorOpen: false,
-  selectedLayerId: null,
+  viewScaleMode: "fit",
+  selectedLayerId: "planning-draft",
   selectedArea: {
     id: "a21kd49pe2",
     label: "Dry Exposed Slope Character",
@@ -223,6 +243,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       inspectorOpen: true
     }),
   setMode: (mode) => set({ activeMode: mode }),
+  setViewScaleMode: (mode) => set({ viewScaleMode: mode }),
   setOrthophotoPreview: (fileName, previewUrl) =>
     set((state) => ({
       coordinateStep: 0,

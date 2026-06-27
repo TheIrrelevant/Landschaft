@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged Open-Meteo rate-limit mitigation
+last-change: logged terrain camera scale and relief readability fix
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Scaled 3D camera controls to the generated terrain footprint so 1:1 mode can zoom out to the full map, and added display-only vertical relief emphasis for subtle DEM terrain.
 - Reduced default Open-Meteo terrain generation to fast-preview sampling and added retry/throttle handling for temporary elevation API rate limits.
 - Aligned the Vite chunk warning limit with the known Three.js WebGPU vendor runtime so production builds complete without chunk-size warnings.
 - Completed Checkpoint 1 MVP: orthophoto upload, corner-coordinate terrain generation, external DEM sampling, textured terrain rendering, 2D/3D views, persisted project metadata, and explicit accuracy/source display.

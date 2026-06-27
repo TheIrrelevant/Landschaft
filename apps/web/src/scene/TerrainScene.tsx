@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: apply uploaded orthophoto preview as terrain top texture
+ * last-change: scale camera controls to terrain space and emphasize vertical relief
  * ---end-metadata---
  */
 import {
@@ -84,6 +84,8 @@ const CONTOUR_COLOR = "#969696";
 const TARGET_SCENE_SPAN = 40;
 const CONTOUR_LEVELS = 14;
 const CONTOUR_LIFT = 0.012;
+const FIT_VERTICAL_EXAGGERATION = 2.4;
+const ONE_TO_ONE_VERTICAL_EXAGGERATION = 4.5;
 // Solid base depth BELOW the terrain, expressed in real metres (scaled by
 // displayScale into the scene). ~40 m of "geological block" under the lowest
 // point reads as a carved model.
@@ -101,6 +103,8 @@ const BASE_DEPTH_METERS = 40;
 type TerrainSpace = {
   /** metres -> scene-units factor (uniform on all axes) */
   displayScale: number;
+  /** display-only multiplier for reading subtle terrain relief */
+  verticalScale: number;
   /** terrain footprint in scene units */
   sizeX: number;
   sizeZ: number;
@@ -110,13 +114,18 @@ type TerrainSpace = {
   baseY: number;
 };
 
-function getTerrainSpace(terrain: TerrainModel, scaleOverride?: number): TerrainSpace {
+function getTerrainSpace(
+  terrain: TerrainModel,
+  scaleOverride?: number,
+  verticalScale = FIT_VERTICAL_EXAGGERATION
+): TerrainSpace {
   const maxMeters = Math.max(terrain.width, terrain.depth, 1);
   const displayScale = scaleOverride ?? TARGET_SCENE_SPAN / maxMeters;
   const rangeMeters = Math.max(terrain.maxElevation - terrain.minElevation, 0.01);
 
   return {
     displayScale,
+    verticalScale,
     sizeX: terrain.width * displayScale,
     sizeZ: terrain.depth * displayScale,
     rangeMeters,
@@ -269,7 +278,7 @@ function gridToLocal(
  */
 function cellHeight(terrain: TerrainModel, space: TerrainSpace, index: number) {
   const elevation = terrain.heightmap[index] ?? terrain.minElevation;
-  return (elevation - terrain.minElevation) * space.displayScale;
+  return (elevation - terrain.minElevation) * space.displayScale * space.verticalScale;
 }
 
 /**
@@ -284,7 +293,7 @@ function buildContourGeometry(terrain: TerrainModel, space: TerrainSpace) {
   const positions: number[] = [];
 
   // Surface spans y = 0 (terrain min) .. rangeMeters * displayScale (terrain max).
-  const surfaceMax = space.rangeMeters * space.displayScale;
+  const surfaceMax = space.rangeMeters * space.displayScale * space.verticalScale;
   const step = surfaceMax / (CONTOUR_LEVELS + 1);
   const lift = CONTOUR_LIFT * Math.max(space.displayScale, 0.0001) * 50;
 
@@ -568,7 +577,14 @@ function TerrainContent() {
   const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
   const orthophotoTexture = useOrthophotoTexture(orthophotoPreviewUrl);
   const space = useMemo(
-    () => getTerrainSpace(terrain, viewScaleMode === "1:1" ? 1 : undefined),
+    () =>
+      getTerrainSpace(
+        terrain,
+        viewScaleMode === "1:1" ? 1 : undefined,
+        viewScaleMode === "1:1"
+          ? ONE_TO_ONE_VERTICAL_EXAGGERATION
+          : FIT_VERTICAL_EXAGGERATION
+      ),
     [terrain, viewScaleMode]
   );
 
@@ -686,18 +702,29 @@ function SceneLights() {
 }
 
 export function TerrainScene() {
+  const terrain = useEditorStore((state) => state.terrain);
   const terrainGenerated = useEditorStore((state) => state.terrainGenerated);
   const activeMode = useEditorStore((state) => state.activeMode);
+  const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
 
-  // The camera is anchored to a FIXED reference span (TARGET_SCENE_SPAN), not to
-  // the terrain's current scene size. In "fit" mode the terrain is scaled into
-  // that span so it frames perfectly; in "1:1" mode the terrain keeps its true
-  // metre size and therefore overflows the frame — you feel the real scale, like
-  // switching to 1:1 in AutoCAD. far/near stay generous so 1:1 never clips.
+  const space = useMemo(
+    () =>
+      getTerrainSpace(
+        terrain,
+        viewScaleMode === "1:1" ? 1 : undefined,
+        viewScaleMode === "1:1"
+          ? ONE_TO_ONE_VERTICAL_EXAGGERATION
+          : FIT_VERTICAL_EXAGGERATION
+      ),
+    [terrain, viewScaleMode]
+  );
+
   const { controls, perspectiveStart, topStart } = useMemo(() => {
-    const ref = TARGET_SCENE_SPAN;
-    const dist = ref * 1.15;
-    const topDist = ref * 2.25;
+    const span = Math.max(space.sizeX, space.sizeZ, TARGET_SCENE_SPAN);
+    const height = space.rangeMeters * space.displayScale * space.verticalScale;
+    const radius = Math.hypot(span, height + Math.abs(space.baseY));
+    const dist = radius * 1.35;
+    const topDist = radius * 2.4;
     return {
       perspectiveStart: [dist * 0.8, dist * 0.66, dist * 0.8] as [
         number,
@@ -706,16 +733,16 @@ export function TerrainScene() {
       ],
       topStart: [0, topDist, 0] as [number, number, number],
       controls: {
-        far: ref * 400,
-        near: ref / 200,
-        minDistance: ref * 0.12,
-        maxDistance: ref * 60,
+        far: radius * 80,
+        near: Math.max(radius / 2000, 0.01),
+        minDistance: Math.max(radius * 0.02, 1),
+        maxDistance: radius * 8,
         topMaxZoom: 60,
-        topMinZoom: 3,
-        topZoom: 13
+        topMinZoom: Math.max(0.02, TARGET_SCENE_SPAN / (span * 5)),
+        topZoom: Math.max(0.05, TARGET_SCENE_SPAN / (span * 1.35))
       }
     };
-  }, []);
+  }, [space]);
   const isTopView = activeMode === "top-view";
   const cameraPosition = isTopView ? topStart : perspectiveStart;
 

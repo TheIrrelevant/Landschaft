@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: keep orthophoto texture separate from generated terrain mesh
+ * last-change: smooth terrain mesh normals with indexed top geometry
  * ---end-metadata---
  */
 import {
@@ -167,9 +167,15 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
   const grid = getRenderGridSize(terrain);
   const positions: number[] = [];
   const uvs: number[] = [];
+  const indices: number[] = [];
   const baseY = space.baseY;
   const last = grid - 1;
 
+  const addVertex = (position: Vec3, uv: [number, number]) => {
+    positions.push(position[0], position[1], position[2]);
+    uvs.push(uv[0], uv[1]);
+    return positions.length / 3 - 1;
+  };
   const top = (gx: number, gy: number): Vec3 => {
     const u = gx / last;
     const v = gy / last;
@@ -179,7 +185,10 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
     const t = gridCoordToLocal(gx, gy, grid, 0, space);
     return [t[0], baseY, t[2]];
   };
-  // tri pushes one triangle with its three UVs.
+  const indexedTri = (a: number, b: number, c: number) => {
+    indices.push(a, b, c);
+  };
+  // tri pushes an isolated triangle for hard-edged walls and base faces.
   const tri = (
     a: Vec3,
     b: Vec3,
@@ -188,29 +197,30 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
     uvB: [number, number],
     uvC: [number, number]
   ) => {
-    positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-    uvs.push(uvA[0], uvA[1], uvB[0], uvB[1], uvC[0], uvC[1]);
+    indexedTri(addVertex(a, uvA), addVertex(b, uvB), addVertex(c, uvC));
   };
 
   const gridUv = (gx: number, gy: number): [number, number] => [gx / last, gy / last];
+  const topVertexIndex = (gx: number, gy: number) => gy * grid + gx;
 
   // --- GROUP 0: Top surface (fabric) ---
-  let topTriCount = 0;
-  for (let gy = 0; gy < last; gy += 1) {
-    for (let gx = 0; gx < last; gx += 1) {
-      const a = top(gx, gy);
-      const b = top(gx + 1, gy);
-      const c = top(gx + 1, gy + 1);
-      const d = top(gx, gy + 1);
-      const ua = gridUv(gx, gy);
-      const ub = gridUv(gx + 1, gy);
-      const uc = gridUv(gx + 1, gy + 1);
-      const ud = gridUv(gx, gy + 1);
-      tri(a, c, b, ua, uc, ub);
-      tri(a, d, c, ua, ud, uc);
-      topTriCount += 2;
+  for (let gy = 0; gy < grid; gy += 1) {
+    for (let gx = 0; gx < grid; gx += 1) {
+      addVertex(top(gx, gy), gridUv(gx, gy));
     }
   }
+
+  for (let gy = 0; gy < last; gy += 1) {
+    for (let gx = 0; gx < last; gx += 1) {
+      const a = topVertexIndex(gx, gy);
+      const b = topVertexIndex(gx + 1, gy);
+      const c = topVertexIndex(gx + 1, gy + 1);
+      const d = topVertexIndex(gx, gy + 1);
+      indexedTri(a, c, b);
+      indexedTri(a, d, c);
+    }
+  }
+  const topIndexCount = indices.length;
 
   // --- GROUP 1: Side walls + base (solid terrain) ---
   // Wall UVs span horizontal position (u) and vertical 0..1 (top=1, bottom=0).
@@ -265,12 +275,12 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
   const geometry = new BufferGeometry();
   geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
   geometry.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
-  const totalTris = positions.length / 9;
   // Group 0 = fabric top, group 1 = solid terrain sides/base.
-  geometry.addGroup(0, topTriCount * 3, 0);
-  geometry.addGroup(topTriCount * 3, (totalTris - topTriCount) * 3, 1);
+  geometry.addGroup(0, topIndexCount, 0);
+  geometry.addGroup(topIndexCount, indices.length - topIndexCount, 1);
 
   return geometry;
 }

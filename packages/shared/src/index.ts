@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: added USGS contour-source terrain generation
+ * last-change: smooth USGS contour-derived terrain heightmaps
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -367,9 +367,10 @@ async function generateTerrainModelFromUsgsContours(
     );
   }
 
-  const heightmap = samplePoints.map((point) =>
+  const rawHeightmap = samplePoints.map((point) =>
     interpolateElevationFromContours(point, contourSamples)
   );
+  const heightmap = smoothHeightmap(rawHeightmap, gridSize, 2);
 
   return {
     accuracyStatus: "external-dem",
@@ -443,7 +444,7 @@ function interpolateElevationFromContours(
       distance: getCoordinateDistanceMeters(point, contour)
     }))
     .sort((a, b) => a.distance - b.distance)
-    .slice(0, 8);
+    .slice(0, 24);
 
   const exact = nearest.find((sample) => sample.distance < 0.5);
   if (exact) {
@@ -454,12 +455,36 @@ function interpolateElevationFromContours(
   let totalWeight = 0;
 
   for (const sample of nearest) {
-    const weight = 1 / Math.max(sample.distance * sample.distance, 1);
+    const weight = 1 / Math.max(sample.distance ** 1.6, 1);
     weightedElevation += sample.elevation * weight;
     totalWeight += weight;
   }
 
-  return Number((weightedElevation / totalWeight).toFixed(2));
+  return weightedElevation / totalWeight;
+}
+
+function smoothHeightmap(heightmap: number[], gridSize: number, passes: number) {
+  let current = heightmap;
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    current = current.map((value, index) => {
+      const x = index % gridSize;
+      const y = Math.floor(index / gridSize);
+
+      if (x === 0 || y === 0 || x === gridSize - 1 || y === gridSize - 1) {
+        return value;
+      }
+
+      const north = current[(y - 1) * gridSize + x] ?? value;
+      const east = current[y * gridSize + x + 1] ?? value;
+      const south = current[(y + 1) * gridSize + x] ?? value;
+      const west = current[y * gridSize + x - 1] ?? value;
+
+      return value * 0.5 + (north + east + south + west) * 0.125;
+    });
+  }
+
+  return current.map((value) => Number(value.toFixed(2)));
 }
 
 export function getExtentMeters(corners: OrthophotoCorner[]) {

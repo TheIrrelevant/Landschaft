@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: orthophoto-first layer flow with selectable terrain source
+ * last-change: use detailed terrain sampling for contour mesh generation
  * ---end-metadata---
  */
 import {
@@ -116,7 +116,7 @@ function createTerrainRequest(
     coordinateReferenceSystem: project.coordinateReferenceSystem,
     sourceImageName: project.sourceImageName,
     corners: project.corners,
-    quality: "fast-preview",
+    quality: heightSource === "usgs-contours" ? "detailed" : "fast-preview",
     heightSource
   };
 }

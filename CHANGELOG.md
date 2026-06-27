@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged neutral terrain mesh material
+last-change: logged smoother contour terrain mesh
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Rebuilt terrain top geometry as an indexed shared-vertex surface, increased contour-source generation quality, and smoothed USGS contour-derived heightmaps so izohypse terrain no longer shades as disconnected grid patches.
 - Stopped draping orthophoto imagery onto generated terrain meshes; orthophotos now stay as separate 2D reference layers while the 3D terrain renders with a neutral topo material.
 - Reset the browser project snapshot key after the orthophoto-first workflow change so stale terrain canvases no longer reload into the editor.
 - Reworked the terrain workflow so orthophoto upload creates a visible 2D base-map layer, mesh generation hides that flat layer and renders a separate neutral 3D mesh, layer visibility controls the scene, and USGS contour lines can be used as the preferred terrain source when available.

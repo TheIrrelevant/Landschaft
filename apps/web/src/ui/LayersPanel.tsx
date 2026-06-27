@@ -4,7 +4,7 @@
  * description: Collapsible Photoshop-style layer list for the Landschaft sidebar.
  * last-updated: 2026-06-25
  * last-model: cursor-composer
- * last-change: v3 layers panel with blend/opacity controls and selected row styling
+ * last-change: keep layer panel body empty when no layers exist
  * ---end-metadata---
  */
 import {
@@ -54,7 +54,7 @@ export function LayersPanel() {
         )}
       </button>
 
-      {sectionOpen ? (
+      {sectionOpen && layers.length > 0 ? (
         <div className="layers-panel-body">
           <div className="layer-controls">
             <div className="layer-control">

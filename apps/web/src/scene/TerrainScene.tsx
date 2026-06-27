@@ -2,12 +2,16 @@
  * ---metadata---
  * type: app-source
  * description: Three.js terrain preview scene for the Landschaft editor.
- * last-updated: 2026-06-26
- * last-model: amelia(claude-opus-4-8)
- * last-change: real-metre coordinate space with uniform displayScale (AutoCAD model)
+ * last-updated: 2026-06-27
+ * last-model: codex-gpt-5
+ * last-change: locked top-down camera for 2D view mode
  * ---end-metadata---
  */
-import { OrbitControls } from "@react-three/drei";
+import {
+  OrbitControls,
+  OrthographicCamera,
+  PerspectiveCamera
+} from "@react-three/drei";
 import {
   Canvas,
   extend,
@@ -532,25 +536,66 @@ function TerrainContent() {
  * Fit <-> 1:1), since R3F only reads the <Canvas camera> prop on first mount.
  */
 function CameraRig({
+  mode,
   far,
   near,
-  position
+  position,
+  zoom
 }: {
+  mode: "top-view" | "terrain-3d";
   far: number;
   near: number;
   position: [number, number, number];
+  zoom?: number;
 }) {
   const camera = useThree((state) => state.camera);
 
   useEffect(() => {
     camera.position.set(position[0], position[1], position[2]);
+    camera.up.set(0, mode === "top-view" ? 0 : 1, mode === "top-view" ? -1 : 0);
+    if ("zoom" in camera && zoom) {
+      camera.zoom = zoom;
+    }
     if ("far" in camera) {
       camera.far = far;
       camera.near = near;
       camera.updateProjectionMatrix();
     }
     camera.lookAt(0, 0, 0);
-  }, [camera, far, near, position]);
+  }, [camera, far, mode, near, position, zoom]);
+
+  return null;
+}
+
+function TopViewZoomControls({
+  maxZoom,
+  minZoom
+}: {
+  maxZoom: number;
+  minZoom: number;
+}) {
+  const camera = useThree((state) => state.camera);
+  const gl = useThree((state) => state.gl);
+
+  useEffect(() => {
+    const element = gl.domElement;
+    const onWheel = (event: WheelEvent) => {
+      if (!("zoom" in camera)) {
+        return;
+      }
+
+      event.preventDefault();
+      const zoomStep = event.deltaY > 0 ? 0.9 : 1.1;
+      camera.zoom = Math.min(maxZoom, Math.max(minZoom, camera.zoom * zoomStep));
+      camera.updateProjectionMatrix();
+    };
+
+    element.addEventListener("wheel", onWheel, { passive: false });
+
+    return () => {
+      element.removeEventListener("wheel", onWheel);
+    };
+  }, [camera, gl, maxZoom, minZoom]);
 
   return null;
 }
@@ -588,53 +633,90 @@ function SceneLights() {
 
 export function TerrainScene() {
   const terrainGenerated = useEditorStore((state) => state.terrainGenerated);
+  const activeMode = useEditorStore((state) => state.activeMode);
 
   // The camera is anchored to a FIXED reference span (TARGET_SCENE_SPAN), not to
   // the terrain's current scene size. In "fit" mode the terrain is scaled into
   // that span so it frames perfectly; in "1:1" mode the terrain keeps its true
   // metre size and therefore overflows the frame — you feel the real scale, like
   // switching to 1:1 in AutoCAD. far/near stay generous so 1:1 never clips.
-  const { camStart, controls } = useMemo(() => {
+  const { controls, perspectiveStart, topStart } = useMemo(() => {
     const ref = TARGET_SCENE_SPAN;
     const dist = ref * 1.15;
+    const topDist = ref * 2.25;
     return {
-      camStart: [dist * 0.8, dist * 0.66, dist * 0.8] as [number, number, number],
+      perspectiveStart: [dist * 0.8, dist * 0.66, dist * 0.8] as [
+        number,
+        number,
+        number
+      ],
+      topStart: [0, topDist, 0] as [number, number, number],
       controls: {
         far: ref * 400,
         near: ref / 200,
         minDistance: ref * 0.12,
-        maxDistance: ref * 60
+        maxDistance: ref * 60,
+        topMaxZoom: 60,
+        topMinZoom: 3,
+        topZoom: 13
       }
     };
   }, []);
+  const isTopView = activeMode === "top-view";
+  const cameraPosition = isTopView ? topStart : perspectiveStart;
 
   return (
     <Canvas
-      camera={{
-        far: controls.far,
-        fov: 27,
-        near: controls.near,
-        position: camStart
-      }}
       dpr={[1, 1.5]}
       gl={createWebGPURenderer as unknown as undefined}
       shadows
     >
       <color attach="background" args={[new Color(VIEW_BACKGROUND)]} />
-      <CameraRig far={controls.far} near={controls.near} position={camStart} />
+      {isTopView ? (
+        <OrthographicCamera
+          far={controls.far}
+          makeDefault
+          near={controls.near}
+          position={topStart}
+          up={[0, 0, -1]}
+          zoom={controls.topZoom}
+        />
+      ) : (
+        <PerspectiveCamera
+          far={controls.far}
+          fov={27}
+          makeDefault
+          near={controls.near}
+          position={perspectiveStart}
+        />
+      )}
+      <CameraRig
+        far={controls.far}
+        mode={activeMode}
+        near={controls.near}
+        position={cameraPosition}
+        zoom={isTopView ? controls.topZoom : undefined}
+      />
       <SceneLights />
       {terrainGenerated ? <TerrainContent /> : null}
-      <OrbitControls
-        dampingFactor={0.06}
-        enableDamping
-        enablePan={false}
-        makeDefault
-        maxDistance={controls.maxDistance}
-        maxPolarAngle={Math.PI / 2.35}
-        minDistance={controls.minDistance}
-        minPolarAngle={0.52}
-        target={[0, 0, 0]}
-      />
+      {isTopView ? (
+        <TopViewZoomControls
+          maxZoom={controls.topMaxZoom}
+          minZoom={controls.topMinZoom}
+        />
+      ) : (
+        <OrbitControls
+          dampingFactor={0.06}
+          enableDamping
+          enablePan={false}
+          makeDefault
+          maxDistance={controls.maxDistance}
+          maxPolarAngle={Math.PI / 2.35}
+          minDistance={controls.minDistance}
+          minPolarAngle={0.52}
+          target={[0, 0, 0]}
+        />
+      )}
     </Canvas>
   );
 }

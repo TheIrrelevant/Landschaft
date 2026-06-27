@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-25
  * last-model: codex-gpt-5
- * last-change: aligned default editor state with v3 reference UI
+ * last-change: start new projects with empty canvas and layer stack
  * ---end-metadata---
  */
 import type {
@@ -46,49 +46,6 @@ interface EditorState {
   setLayerOpacity: (layerId: string, opacity: number) => void;
   toggleLayer: (layerId: string) => void;
 }
-
-const defaultLayers: PlanningLayer[] = [
-  {
-    id: "orthophoto-base",
-    name: "Orthophoto Base",
-    kind: "orthophoto",
-    visible: true,
-    opacity: 1,
-    reviewStatus: "draft"
-  },
-  {
-    id: "terrain-mesh",
-    name: "Terrain Mesh",
-    kind: "terrain",
-    visible: true,
-    opacity: 1,
-    reviewStatus: "draft"
-  },
-  {
-    id: "planning-draft",
-    name: "Planning Draft",
-    kind: "suitability",
-    visible: true,
-    opacity: 1,
-    reviewStatus: "draft"
-  },
-  {
-    id: "lca-areas",
-    name: "Landscape Areas",
-    kind: "lca",
-    visible: true,
-    opacity: 0.72,
-    reviewStatus: "draft"
-  },
-  {
-    id: "strategy-map",
-    name: "Strategy Map",
-    kind: "strategy",
-    visible: true,
-    opacity: 0.64,
-    reviewStatus: "draft"
-  }
-];
 
 const defaultCorners: OrthophotoCorner[] = [
   { label: "NW", latitude: 41.0312, longitude: 29.0141 },
@@ -166,30 +123,16 @@ function getDistanceMeters(
 const initialProject = createProject(defaultCorners);
 
 export const useEditorStore = create<EditorState>((set) => ({
-  layers: defaultLayers,
+  layers: [],
   project: initialProject,
   terrain: createTerrain(defaultCorners),
-  terrainGenerated: true,
+  terrainGenerated: false,
   orthophotoPreviewUrl: null,
   coordinateStep: null,
   inspectorOpen: false,
   viewScaleMode: "fit",
-  selectedLayerId: "planning-draft",
-  selectedArea: {
-    id: "a21kd49pe2",
-    label: "Dry Exposed Slope Character",
-    ring: [
-      [34, 24],
-      [24, 25],
-      [20, 19],
-      [24, 35],
-      [34, 24]
-    ],
-    layer: "soil",
-    code: "23",
-    meaning: "Red soil on a gentle slope with settlement-edge pressure.",
-    confidence: 0.74
-  },
+  selectedLayerId: null,
+  selectedArea: null,
   activeMode: "terrain-3d",
   advanceCoordinateStep: () =>
     set((state) => ({

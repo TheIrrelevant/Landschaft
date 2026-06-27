@@ -1,12 +1,17 @@
 ---
 type: changelog
 description: Release history for the Landschaft landscape planning editor.
-last-updated: 2026-06-26
-last-model: amelia(claude-opus-4-8)
-last-change: logged WebGPU viewer, solid terrain, real-metre coordinate space
+last-updated: 2026-06-27
+last-model: codex-gpt-5
+last-change: logged locked 2D top view and clean empty startup state
 ---
 
 # Changelog
+
+## Unreleased
+
+- Locked the 2D canvas mode to a clean orthographic top view with rotation and pan disabled, while preserving the default 3D perspective/orbit mode.
+- Reset the initial editor state to a clean empty canvas and empty layer stack so new projects no longer show demo terrain or demo layers.
 
 ## 0.2.0 - 2026-06-26
 

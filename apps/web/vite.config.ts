@@ -1,16 +1,16 @@
 /*
  * type: config
  * description: Vite configuration for the Landschaft web editor.
- * last-updated: 2026-06-25
+ * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: split large vendor bundles into stable chunks
+ * last-change: align chunk warning limit with the WebGPU vendor runtime
  */
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
   build: {
-    chunkSizeWarningLimit: 750,
+    chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -26,15 +26,15 @@ export default defineConfig({
             return "react-vendor";
           }
 
-          if (id.includes("/three/")) {
-            return "three-core";
-          }
-
           if (
             id.includes("/@react-three/fiber/") ||
             id.includes("/@react-three/drei/")
           ) {
             return "react-three";
+          }
+
+          if (id.includes("/three/")) {
+            return "three-core";
           }
 
           if (

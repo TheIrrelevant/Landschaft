@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged checkpoint 1 MVP completion
+last-change: logged WebGPU vendor chunk warning fix
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Aligned the Vite chunk warning limit with the known Three.js WebGPU vendor runtime so production builds complete without chunk-size warnings.
 - Completed Checkpoint 1 MVP: orthophoto upload, corner-coordinate terrain generation, external DEM sampling, textured terrain rendering, 2D/3D views, persisted project metadata, and explicit accuracy/source display.
 - Integrated the Open-Meteo Elevation API as the first real external DEM source for terrain generation.
 - Added validated project snapshot persistence for generated terrain metadata, terrain models, and layer state.

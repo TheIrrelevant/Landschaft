@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: expose USGS contour diagnostics on generated terrain models
+ * last-change: add elevation-level contour diagnostics
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -88,7 +88,16 @@ export const TerrainModelSchema = z.object({
       closedPathCount: z.number().int().nonnegative(),
       segmentCount: z.number().int().nonnegative(),
       ringCount: z.number().int().nonnegative(),
-      elevations: z.array(z.number())
+      elevations: z.array(z.number()),
+      elevationStats: z.array(
+        z.object({
+          elevation: z.number(),
+          pathCount: z.number().int().nonnegative(),
+          openPathCount: z.number().int().nonnegative(),
+          closedPathCount: z.number().int().nonnegative(),
+          ringCount: z.number().int().nonnegative()
+        })
+      )
     })
     .optional(),
   heightmap: z.array(z.number()),
@@ -112,6 +121,13 @@ export interface TerrainModel {
     segmentCount: number;
     ringCount: number;
     elevations: number[];
+    elevationStats: {
+      elevation: number;
+      pathCount: number;
+      openPathCount: number;
+      closedPathCount: number;
+      ringCount: number;
+    }[];
   };
   heightmap: number[];
   generatedAt: string;
@@ -457,6 +473,15 @@ async function fetchUsgsContourGeometry(corners: OrthophotoCorner[]) {
   let openPathCount = 0;
   let pathCount = 0;
   const elevations = new Set<number>();
+  const statsByElevation = new Map<
+    number,
+    {
+      closedPathCount: number;
+      openPathCount: number;
+      pathCount: number;
+      ringCount: number;
+    }
+  >();
 
   for (const feature of features) {
     const elevation = feature.attributes?.contourelevation;
@@ -465,18 +490,31 @@ async function fetchUsgsContourGeometry(corners: OrthophotoCorner[]) {
       continue;
     }
     elevations.add(elevation);
+    const elevationStats =
+      statsByElevation.get(elevation) ??
+      {
+        closedPathCount: 0,
+        openPathCount: 0,
+        pathCount: 0,
+        ringCount: 0
+      };
+    statsByElevation.set(elevation, elevationStats);
 
     for (const path of feature.geometry?.paths ?? []) {
       pathCount += 1;
+      elevationStats.pathCount += 1;
       const pathPoints = toTerrainSamplePath(path);
       if (isClosedContourPath(pathPoints)) {
         closedPathCount += 1;
+        elevationStats.closedPathCount += 1;
+        elevationStats.ringCount += 1;
         rings.push({
           points: pathPoints.slice(0, -1),
           elevation
         });
       } else {
         openPathCount += 1;
+        elevationStats.openPathCount += 1;
       }
 
       for (let index = 0; index < path.length - 1; index += 1) {
@@ -509,7 +547,13 @@ async function fetchUsgsContourGeometry(corners: OrthophotoCorner[]) {
       closedPathCount,
       segmentCount: segments.length,
       ringCount: rings.length,
-      elevations: Array.from(elevations).sort((a, b) => a - b)
+      elevations: Array.from(elevations).sort((a, b) => a - b),
+      elevationStats: Array.from(statsByElevation.entries())
+        .sort(([elevationA], [elevationB]) => elevationA - elevationB)
+        .map(([elevation, stats]) => ({
+          elevation,
+          ...stats
+        }))
     },
     rings,
     segments

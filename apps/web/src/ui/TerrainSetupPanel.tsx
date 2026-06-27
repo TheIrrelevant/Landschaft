@@ -4,7 +4,7 @@
  * description: Upload-first orthophoto setup with sequential corner coordinate prompts.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: display contour source diagnostics after terrain generation
+ * last-change: display elevation-level contour diagnostics
  * ---end-metadata---
  */
 import { ChevronDown, ChevronUp, CloudUpload, Image } from "lucide-react";
@@ -209,6 +209,14 @@ export function TerrainSetupPanel() {
                       {formatElevationList(terrain.contourDiagnostics.elevations)}
                     </strong>
                   </div>
+                  <div>
+                    <span>Elevation rings</span>
+                    <strong>
+                      {formatElevationStats(
+                        terrain.contourDiagnostics.elevationStats
+                      )}
+                    </strong>
+                  </div>
                   {terrain.contourInterval ? (
                     <div>
                       <span>Interval</span>
@@ -227,6 +235,27 @@ export function TerrainSetupPanel() {
       ) : null}
     </section>
   );
+}
+
+function formatElevationStats(
+  stats: Array<{
+    elevation: number;
+    pathCount: number;
+    openPathCount: number;
+    closedPathCount: number;
+    ringCount: number;
+  }>
+) {
+  if (stats.length === 0) {
+    return "No elevation topology";
+  }
+
+  return stats
+    .map(
+      (stat) =>
+        `${stat.elevation}m: ${stat.ringCount} rings, ${stat.openPathCount} open`
+    )
+    .join(" / ");
 }
 
 function formatElevationList(elevations: number[]) {

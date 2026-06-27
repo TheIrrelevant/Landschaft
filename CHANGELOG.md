@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged scrollable sidebar content
+last-change: logged elevation-level contour diagnostics
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Added elevation-level contour diagnostics that show ring and open-path counts per contour elevation.
 - Made the sidebar content scrollable so expanded orthophoto diagnostics and layer controls remain reachable on shorter viewports.
 - Added visible USGS contour diagnostics after terrain generation, including feature/path counts, open versus closed paths, ring count, segment count, and elevation attributes.
 - Lift grid cells inside closed USGS contour rings to at least the ring elevation so higher contour interiors become raised terrain plates instead of staying on lower bands.

@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: render terrain elevations from absolute source metres
+ * last-change: render contour terraces as polygon extrusions
  * ---end-metadata---
  */
 import {
@@ -27,8 +27,10 @@ import {
   DoubleSide,
   Float32BufferAttribute,
   RepeatWrapping,
+  ShapeUtils,
   SRGBColorSpace,
   TextureLoader,
+  Vector2,
   type Texture
 } from "three";
 import * as THREE from "three/webgpu";
@@ -156,6 +158,7 @@ function getProjectSpace(project: ProjectMetadata, scaleOverride?: number): Proj
 }
 
 type Vec3 = [number, number, number];
+type Vec2 = [number, number];
 
 /**
  * Build a solid terrain block in local y-up space: heightmap top surface, four
@@ -290,6 +293,182 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
   return geometry;
 }
 
+function buildContourTerraceGeometry(terrain: TerrainModel, space: TerrainSpace) {
+  const terraces = [...(terrain.contourTerraces ?? [])].sort(
+    (a, b) => a.elevation - b.elevation
+  );
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  const addVertex = (position: Vec3, uv: [number, number]) => {
+    positions.push(position[0], position[1], position[2]);
+    uvs.push(uv[0], uv[1]);
+    return positions.length / 3 - 1;
+  };
+
+  for (const terrace of terraces) {
+    const points = dedupeContourPoints(terrace.points);
+    if (points.length < 3) {
+      continue;
+    }
+
+    const topY = elevationToSceneHeight(terrace.elevation, space);
+    const bottomY = elevationToSceneHeight(
+      getContainingLowerTerraceElevation(terrace, terraces, terrain.minElevation),
+      space
+    );
+    const topStart = positions.length / 3;
+
+    for (const point of points) {
+      const [x, , z] = normalizedGridToLocal(point[0], point[1], topY, space);
+      addVertex([x, topY, z], point);
+    }
+
+    const triangles = ShapeUtils.triangulateShape(
+      points.map(([u, v]) => new Vector2(u, v)),
+      []
+    );
+    const clockwise = getSignedArea(points) < 0;
+
+    for (const triangle of triangles) {
+      const [a, b, c] = triangle;
+      if (a === undefined || b === undefined || c === undefined) {
+        continue;
+      }
+
+      if (clockwise) {
+        indices.push(topStart + a, topStart + b, topStart + c);
+      } else {
+        indices.push(topStart + a, topStart + c, topStart + b);
+      }
+    }
+
+    for (let index = 0; index < points.length; index += 1) {
+      const nextIndex = (index + 1) % points.length;
+      const current = points[index];
+      const next = points[nextIndex];
+      if (!current || !next) {
+        continue;
+      }
+
+      const currentTop = normalizedGridToLocal(current[0], current[1], topY, space);
+      const nextTop = normalizedGridToLocal(next[0], next[1], topY, space);
+      const currentBottom = normalizedGridToLocal(
+        current[0],
+        current[1],
+        bottomY,
+        space
+      );
+      const nextBottom = normalizedGridToLocal(next[0], next[1], bottomY, space);
+      const a = addVertex(currentTop, current);
+      const b = addVertex(nextTop, next);
+      const c = addVertex(nextBottom, next);
+      const d = addVertex(currentBottom, current);
+      indices.push(a, b, c, a, c, d);
+    }
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  return geometry;
+}
+
+function dedupeContourPoints(points: Vec2[]) {
+  return points.filter((point, index) => {
+    const previous = points[index - 1] ?? points[points.length - 1];
+    if (!previous) {
+      return true;
+    }
+
+    return Math.hypot(point[0] - previous[0], point[1] - previous[1]) > 0.000001;
+  });
+}
+
+function getContainingLowerTerraceElevation(
+  terrace: { elevation: number; points: Vec2[] },
+  terraces: Array<{ elevation: number; points: Vec2[] }>,
+  fallbackElevation: number
+) {
+  const center = getPolygonCentroid(terrace.points);
+  let bottomElevation = fallbackElevation;
+
+  for (const candidate of terraces) {
+    if (candidate.elevation >= terrace.elevation) {
+      continue;
+    }
+
+    if (
+      candidate.elevation > bottomElevation &&
+      isPointInNormalizedPolygon(center, candidate.points)
+    ) {
+      bottomElevation = candidate.elevation;
+    }
+  }
+
+  return bottomElevation;
+}
+
+function getPolygonCentroid(points: Vec2[]): Vec2 {
+  const sum = points.reduce<Vec2>(
+    (total, point) => [total[0] + point[0], total[1] + point[1]],
+    [0, 0]
+  );
+
+  return [sum[0] / points.length, sum[1] / points.length];
+}
+
+function isPointInNormalizedPolygon(point: Vec2, polygon: Vec2[]) {
+  let inside = false;
+
+  for (
+    let currentIndex = 0, previousIndex = polygon.length - 1;
+    currentIndex < polygon.length;
+    previousIndex = currentIndex, currentIndex += 1
+  ) {
+    const current = polygon[currentIndex];
+    const previous = polygon[previousIndex];
+    if (!current || !previous) {
+      continue;
+    }
+
+    const crossesY = current[1] > point[1] !== previous[1] > point[1];
+    if (!crossesY) {
+      continue;
+    }
+
+    const intersectionX =
+      ((previous[0] - current[0]) * (point[1] - current[1])) /
+        (previous[1] - current[1]) +
+      current[0];
+
+    if (point[0] < intersectionX) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+function getSignedArea(points: Vec2[]) {
+  let area = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    if (!current || !next) {
+      continue;
+    }
+
+    area += current[0] * next[1] - next[0] * current[1];
+  }
+
+  return area / 2;
+}
+
 /**
  * Map a grid cell (gx, gy) + a scene-unit height into local scene space.
  * Terrain is centred on (0,0): plane-X -> scene-X, grid-row -> scene-Z. Sizes
@@ -330,7 +509,7 @@ function sampleHeightAt(
   v: number
 ) {
   const elevation = sampleElevationAt(terrain, u, v);
-  return elevation * space.displayScale * space.verticalScale;
+  return elevationToSceneHeight(elevation, space);
 }
 
 function sampleTerracedHeightAt(
@@ -340,6 +519,10 @@ function sampleTerracedHeightAt(
   v: number
 ) {
   const elevation = sampleTerracedElevationAt(terrain, u, v);
+  return elevationToSceneHeight(elevation, space);
+}
+
+function elevationToSceneHeight(elevation: number, space: TerrainSpace) {
   return elevation * space.displayScale * space.verticalScale;
 }
 
@@ -614,6 +797,62 @@ function TerrainMesh({
   );
 }
 
+function ContourTerraceMesh({
+  terrain,
+  space
+}: {
+  terrain: TerrainModel;
+  space: TerrainSpace;
+}) {
+  const geometry = useMemo(
+    () => buildContourTerraceGeometry(terrain, space),
+    [terrain, space]
+  );
+  const material = useMemo(
+    () =>
+      new THREE.MeshLambertNodeMaterial({
+        color: new Color(TERRAIN_CLAY),
+        map: createFeltTexture(),
+        side: DoubleSide
+      }),
+    []
+  );
+
+  return (
+    <mesh castShadow geometry={geometry} material={material} receiveShadow />
+  );
+}
+
+function BaseTerrainBlock({
+  terrain,
+  space
+}: {
+  terrain: TerrainModel;
+  space: TerrainSpace;
+}) {
+  const baseTopY = elevationToSceneHeight(terrain.minElevation, space);
+  const height = Math.max(baseTopY - space.baseY, 0.1);
+  const material = useMemo(
+    () =>
+      new THREE.MeshLambertNodeMaterial({
+        color: new Color(SOLID_TERRAIN_COLOR),
+        map: createSolidTerrainTexture(),
+        side: DoubleSide
+      }),
+    []
+  );
+
+  return (
+    <mesh
+      material={material}
+      position={[0, space.baseY + height / 2, 0]}
+      receiveShadow
+    >
+      <boxGeometry args={[space.sizeX, height, space.sizeZ]} />
+    </mesh>
+  );
+}
+
 function OrthophotoBaseMap({
   opacity,
   project,
@@ -752,7 +991,14 @@ function TerrainContent() {
       <GroundPlane baseY={space.baseY} />
       {terrainLayer?.visible ?? true ? (
         <>
-          <TerrainMesh terrain={terrain} space={space} />
+          {terrain.contourTerraces?.length ? (
+            <>
+              <BaseTerrainBlock terrain={terrain} space={space} />
+              <ContourTerraceMesh terrain={terrain} space={space} />
+            </>
+          ) : (
+            <TerrainMesh terrain={terrain} space={space} />
+          )}
           <ContourLines terrain={terrain} space={space} />
         </>
       ) : null}

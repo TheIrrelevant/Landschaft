@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: add elevation-level contour diagnostics
+ * last-change: add contour terrace polygons to terrain models
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -80,6 +80,14 @@ export const TerrainModelSchema = z.object({
   minElevation: z.number(),
   maxElevation: z.number(),
   contourInterval: z.number().positive().optional(),
+  contourTerraces: z
+    .array(
+      z.object({
+        elevation: z.number(),
+        points: z.array(CoordinateSchema).min(3)
+      })
+    )
+    .optional(),
   contourDiagnostics: z
     .object({
       featureCount: z.number().int().nonnegative(),
@@ -113,6 +121,10 @@ export interface TerrainModel {
   minElevation: number;
   maxElevation: number;
   contourInterval?: number;
+  contourTerraces?: {
+    elevation: number;
+    points: Coordinate[];
+  }[];
   contourDiagnostics?: {
     featureCount: number;
     pathCount: number;
@@ -425,6 +437,7 @@ async function generateTerrainModelFromUsgsContours(
     contourRings
   );
   const contourInterval = inferContourInterval(contourSegments);
+  const contourTerraces = createContourTerraces(request.corners, contourRings);
 
   return {
     accuracyStatus: "external-dem",
@@ -435,6 +448,7 @@ async function generateTerrainModelFromUsgsContours(
     minElevation: Math.min(...heightmap),
     maxElevation: Math.max(...heightmap),
     ...(contourInterval ? { contourInterval } : {}),
+    contourTerraces,
     contourDiagnostics,
     heightmap,
     generatedAt
@@ -609,6 +623,27 @@ function applyClosedContourRings(
 
     return Number(ringHeight.toFixed(2));
   });
+}
+
+function createContourTerraces(
+  corners: OrthophotoCorner[],
+  rings: ContourRing[]
+) {
+  const bbox = getBoundingBox(corners);
+  const longitudeSpan = Math.max(bbox.maxLongitude - bbox.minLongitude, 0.000001);
+  const latitudeSpan = Math.max(bbox.maxLatitude - bbox.minLatitude, 0.000001);
+
+  return rings
+    .map((ring) => ({
+      elevation: ring.elevation,
+      points: ring.points
+        .map((point): Coordinate => [
+          (point.longitude - bbox.minLongitude) / longitudeSpan,
+          (bbox.maxLatitude - point.latitude) / latitudeSpan
+        ])
+        .filter(([u, v]) => u >= 0 && u <= 1 && v >= 0 && v <= 1)
+    }))
+    .filter((terrace) => terrace.points.length >= 3);
 }
 
 function isPointInContourRing(

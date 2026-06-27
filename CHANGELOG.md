@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged absolute terrain camera framing
+last-change: logged contour generation performance fix
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Optimized USGS contour terrain generation by replacing per-sample full segment sorting with bounded nearest-segment selection and reducing contour fallback grid density now that polygon terraces drive the mesh.
 - Centered 3D camera framing and orbit controls on absolute-elevation terrain bounds so zoom/orbit remains usable after contour terrace extrusion.
 - Excluded the base elevation contour from generated terrace polygons so the terrain base is not redrawn as a duplicate slab.
 - Added contour terrace polygons to USGS terrain models and render them as direct polygon extrusions instead of relying only on raster heightfield interpolation.

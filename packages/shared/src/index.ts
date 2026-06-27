@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: exclude base elevation from contour terrace polygons
+ * last-change: optimize contour terrain generation performance
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -695,13 +695,30 @@ function interpolateElevationFromContours(
   point: TerrainSamplePoint,
   contours: ContourSegment[]
 ) {
-  const nearest = contours
-    .map((contour) => ({
-      elevation: contour.elevation,
-      distance: getPointToSegmentDistanceMeters(point, contour.start, contour.end)
-    }))
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, 32);
+  const nearest: Array<{ elevation: number; distance: number }> = [];
+
+  for (const contour of contours) {
+    const distance = getPointToSegmentDistanceMeters(
+      point,
+      contour.start,
+      contour.end
+    );
+    const sample = { elevation: contour.elevation, distance };
+    const insertIndex = nearest.findIndex(
+      (candidate) => distance < candidate.distance
+    );
+
+    if (insertIndex === -1) {
+      if (nearest.length < 32) {
+        nearest.push(sample);
+      }
+    } else {
+      nearest.splice(insertIndex, 0, sample);
+      if (nearest.length > 32) {
+        nearest.pop();
+      }
+    }
+  }
 
   const exact = nearest.find((sample) => sample.distance < 0.5);
   if (exact) {
@@ -1019,14 +1036,14 @@ function getGridSizeForQuality(quality: TerrainGenerationQuality) {
 
 function getContourGridSizeForQuality(quality: TerrainGenerationQuality) {
   if (quality === "fast-preview") {
-    return 65;
+    return 33;
   }
 
   if (quality === "detailed") {
-    return 129;
+    return 65;
   }
 
-  return 97;
+  return 49;
 }
 
 export interface MapReadRequest {

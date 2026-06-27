@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged orthophoto terrain texture mapping
+last-change: logged browser project snapshot persistence
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Added validated project snapshot persistence for generated terrain metadata, terrain models, and layer state.
 - Applied uploaded orthophoto previews as the terrain top-surface texture after terrain generation, with neutral felt fallback when no image is available.
 - Connected the web terrain generation flow to the shared terrain generation contract so generated terrain now creates the base orthophoto and terrain layer stack.
 - Added shared terrain generation contracts plus a deterministic sample external DEM provider for Checkpoint 1 backend work.

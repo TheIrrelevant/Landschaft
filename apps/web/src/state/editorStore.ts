@@ -4,21 +4,32 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: generate terrain state through shared backend contract
+ * last-change: persist generated project snapshots in browser storage
  * ---end-metadata---
  */
 import {
   generateTerrainProject,
+  ProjectSnapshotSchema,
   type CodedArea,
   type OrthophotoCorner,
   type PlanningLayer,
   type ProjectMetadata,
+  type ProjectSnapshot,
   type TerrainGenerationRequest,
   type TerrainModel
 } from "@landschaft/shared";
 import { create } from "zustand";
 
 type EditorMode = "top-view" | "terrain-3d";
+type EditorPersistedState = Pick<
+  EditorState,
+  | "coordinateStep"
+  | "layers"
+  | "project"
+  | "selectedLayerId"
+  | "terrain"
+  | "terrainGenerated"
+>;
 
 interface EditorState {
   layers: PlanningLayer[];
@@ -68,6 +79,7 @@ const baseTerrainRequest: TerrainGenerationRequest = {
 };
 
 const initialTerrainProject = generateTerrainProject(baseTerrainRequest);
+const PROJECT_SNAPSHOT_STORAGE_KEY = "landschaft.project.snapshot.v1";
 
 function createProject(corners: OrthophotoCorner[], sourceImageName?: string) {
   return generateTerrainProject({
@@ -89,16 +101,67 @@ function createTerrainRequest(project: ProjectMetadata): TerrainGenerationReques
   };
 }
 
+function loadProjectSnapshot(): ProjectSnapshot | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const rawSnapshot = window.localStorage.getItem(PROJECT_SNAPSHOT_STORAGE_KEY);
+  if (!rawSnapshot) {
+    return null;
+  }
+
+  try {
+    const parsedSnapshot = JSON.parse(rawSnapshot) as unknown;
+    const result = ProjectSnapshotSchema.safeParse(parsedSnapshot);
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveProjectSnapshot(snapshot: ProjectSnapshot) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    PROJECT_SNAPSHOT_STORAGE_KEY,
+    JSON.stringify(snapshot)
+  );
+}
+
+function clearProjectSnapshot() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(PROJECT_SNAPSHOT_STORAGE_KEY);
+}
+
+function toProjectSnapshot(state: EditorPersistedState): ProjectSnapshot {
+  return {
+    project: state.project,
+    terrain: state.terrain,
+    layers: state.layers,
+    terrainGenerated: state.terrainGenerated,
+    selectedLayerId: state.selectedLayerId,
+    coordinateStep: state.coordinateStep
+  };
+}
+
+const storedProjectSnapshot = loadProjectSnapshot();
+
 export const useEditorStore = create<EditorState>((set) => ({
-  layers: [],
-  project: initialTerrainProject.project,
-  terrain: initialTerrainProject.terrain,
-  terrainGenerated: false,
+  layers: storedProjectSnapshot?.layers ?? [],
+  project: storedProjectSnapshot?.project ?? initialTerrainProject.project,
+  terrain: storedProjectSnapshot?.terrain ?? initialTerrainProject.terrain,
+  terrainGenerated: storedProjectSnapshot?.terrainGenerated ?? false,
   orthophotoPreviewUrl: null,
-  coordinateStep: null,
+  coordinateStep: storedProjectSnapshot?.coordinateStep ?? null,
   inspectorOpen: false,
   viewScaleMode: "fit",
-  selectedLayerId: null,
+  selectedLayerId: storedProjectSnapshot?.selectedLayerId ?? null,
   selectedArea: null,
   activeMode: "terrain-3d",
   advanceCoordinateStep: () =>
@@ -110,8 +173,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   generateTerrain: () =>
     set((state) => {
       const result = generateTerrainProject(createTerrainRequest(state.project));
-
-      return {
+      const nextState = {
         project: result.project,
         terrain: result.terrain,
         layers: result.baseLayers,
@@ -121,6 +183,9 @@ export const useEditorStore = create<EditorState>((set) => ({
         inspectorOpen: false,
         coordinateStep: 4
       };
+      saveProjectSnapshot(toProjectSnapshot(nextState));
+
+      return nextState;
     }),
   reorderLayer: (sourceLayerId, targetLayerId) =>
     set((state) => {
@@ -138,7 +203,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       const layers = [...state.layers];
       const [movedLayer] = layers.splice(sourceIndex, 1);
       layers.splice(targetIndex, 0, movedLayer);
-
+      saveProjectSnapshot(toProjectSnapshot({ ...state, layers }));
       return { layers };
     }),
   setCornerCoordinate: (label, axis, value) =>
@@ -147,9 +212,10 @@ export const useEditorStore = create<EditorState>((set) => ({
         corner.label === label ? { ...corner, [axis]: value } : corner
       );
 
-      return {
-        project: createProject(corners, state.project.sourceImageName)
-      };
+      const project = createProject(corners, state.project.sourceImageName);
+      saveProjectSnapshot(toProjectSnapshot({ ...state, project }));
+
+      return { project };
     }),
   selectArea: (area) => set({ selectedArea: area }),
   selectLayer: (layerId) =>
@@ -164,6 +230,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       if (state.orthophotoPreviewUrl) {
         URL.revokeObjectURL(state.orthophotoPreviewUrl);
       }
+      clearProjectSnapshot();
 
       return {
         coordinateStep: 0,
@@ -180,15 +247,21 @@ export const useEditorStore = create<EditorState>((set) => ({
       };
     }),
   setLayerOpacity: (layerId, opacity) =>
-    set((state) => ({
-      layers: state.layers.map((layer) =>
+    set((state) => {
+      const layers = state.layers.map((layer) =>
         layer.id === layerId ? { ...layer, opacity } : layer
-      )
-    })),
+      );
+      saveProjectSnapshot(toProjectSnapshot({ ...state, layers }));
+
+      return { layers };
+    }),
   toggleLayer: (layerId) =>
-    set((state) => ({
-      layers: state.layers.map((layer) =>
+    set((state) => {
+      const layers = state.layers.map((layer) =>
         layer.id === layerId ? { ...layer, visible: !layer.visible } : layer
-      )
-    }))
+      );
+      saveProjectSnapshot(toProjectSnapshot({ ...state, layers }));
+
+      return { layers };
+    })
 }));

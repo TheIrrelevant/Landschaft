@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: added terrain generation request contracts and sample provider
+ * last-change: added project snapshot persistence contract
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -147,12 +147,41 @@ export type PlanningLayerKind =
   | "framework"
   | "concept-masterplan";
 
+export const PlanningLayerKindSchema = z.enum([
+  "terrain",
+  "orthophoto",
+  "foundational-map",
+  "lca",
+  "sensitivity-capacity",
+  "strategy",
+  "suitability",
+  "framework",
+  "concept-masterplan"
+]);
+
 export type ReviewStatus =
   | "draft"
   | "needs-review"
   | "reviewed"
   | "approved"
   | "rejected";
+
+export const ReviewStatusSchema = z.enum([
+  "draft",
+  "needs-review",
+  "reviewed",
+  "approved",
+  "rejected"
+]);
+
+export const PlanningLayerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: PlanningLayerKindSchema,
+  visible: z.boolean(),
+  opacity: z.number().min(0).max(1),
+  reviewStatus: ReviewStatusSchema
+});
 
 export interface PlanningLayer {
   id: string;
@@ -162,6 +191,17 @@ export interface PlanningLayer {
   opacity: number;
   reviewStatus: ReviewStatus;
 }
+
+export const ProjectSnapshotSchema = z.object({
+  project: ProjectMetadataSchema,
+  terrain: TerrainModelSchema,
+  layers: z.array(PlanningLayerSchema),
+  terrainGenerated: z.boolean(),
+  selectedLayerId: z.string().nullable(),
+  coordinateStep: z.number().int().min(0).max(4).nullable()
+});
+
+export type ProjectSnapshot = z.infer<typeof ProjectSnapshotSchema>;
 
 export function createProjectMetadata(
   request: NormalizedTerrainGenerationRequest

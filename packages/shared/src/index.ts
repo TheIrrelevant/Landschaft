@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: lift closed contour ring interiors to their contour elevation
+ * last-change: expose USGS contour diagnostics on generated terrain models
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -80,6 +80,17 @@ export const TerrainModelSchema = z.object({
   minElevation: z.number(),
   maxElevation: z.number(),
   contourInterval: z.number().positive().optional(),
+  contourDiagnostics: z
+    .object({
+      featureCount: z.number().int().nonnegative(),
+      pathCount: z.number().int().nonnegative(),
+      openPathCount: z.number().int().nonnegative(),
+      closedPathCount: z.number().int().nonnegative(),
+      segmentCount: z.number().int().nonnegative(),
+      ringCount: z.number().int().nonnegative(),
+      elevations: z.array(z.number())
+    })
+    .optional(),
   heightmap: z.array(z.number()),
   generatedAt: z.string()
 });
@@ -93,6 +104,15 @@ export interface TerrainModel {
   minElevation: number;
   maxElevation: number;
   contourInterval?: number;
+  contourDiagnostics?: {
+    featureCount: number;
+    pathCount: number;
+    openPathCount: number;
+    closedPathCount: number;
+    segmentCount: number;
+    ringCount: number;
+    elevations: number[];
+  };
   heightmap: number[];
   generatedAt: string;
 }
@@ -367,7 +387,11 @@ async function generateTerrainModelFromUsgsContours(
   const extent = getExtentMeters(request.corners);
   const gridSize = getContourGridSizeForQuality(request.quality);
   const samplePoints = createGridSamplePoints(request.corners, gridSize);
-  const { rings: contourRings, segments: contourSegments } =
+  const {
+    diagnostics: contourDiagnostics,
+    rings: contourRings,
+    segments: contourSegments
+  } =
     await fetchUsgsContourGeometry(request.corners);
 
   if (contourSegments.length === 0) {
@@ -395,6 +419,7 @@ async function generateTerrainModelFromUsgsContours(
     minElevation: Math.min(...heightmap),
     maxElevation: Math.max(...heightmap),
     ...(contourInterval ? { contourInterval } : {}),
+    contourDiagnostics,
     heightmap,
     generatedAt
   };
@@ -428,6 +453,10 @@ async function fetchUsgsContourGeometry(corners: OrthophotoCorner[]) {
   const features = payload.features ?? [];
   const rings: ContourRing[] = [];
   const segments: ContourSegment[] = [];
+  let closedPathCount = 0;
+  let openPathCount = 0;
+  let pathCount = 0;
+  const elevations = new Set<number>();
 
   for (const feature of features) {
     const elevation = feature.attributes?.contourelevation;
@@ -435,14 +464,19 @@ async function fetchUsgsContourGeometry(corners: OrthophotoCorner[]) {
     if (typeof elevation !== "number") {
       continue;
     }
+    elevations.add(elevation);
 
     for (const path of feature.geometry?.paths ?? []) {
+      pathCount += 1;
       const pathPoints = toTerrainSamplePath(path);
       if (isClosedContourPath(pathPoints)) {
+        closedPathCount += 1;
         rings.push({
           points: pathPoints.slice(0, -1),
           elevation
         });
+      } else {
+        openPathCount += 1;
       }
 
       for (let index = 0; index < path.length - 1; index += 1) {
@@ -467,7 +501,19 @@ async function fetchUsgsContourGeometry(corners: OrthophotoCorner[]) {
     }
   }
 
-  return { rings, segments };
+  return {
+    diagnostics: {
+      featureCount: features.length,
+      pathCount,
+      openPathCount,
+      closedPathCount,
+      segmentCount: segments.length,
+      ringCount: rings.length,
+      elevations: Array.from(elevations).sort((a, b) => a - b)
+    },
+    rings,
+    segments
+  };
 }
 
 function toTerrainSamplePath(path: number[][]) {

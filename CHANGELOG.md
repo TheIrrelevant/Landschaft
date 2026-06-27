@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged closed contour ring terrain lifting
+last-change: logged contour source diagnostics
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Added visible USGS contour diagnostics after terrain generation, including feature/path counts, open versus closed paths, ring count, segment count, and elevation attributes.
 - Lift grid cells inside closed USGS contour rings to at least the ring elevation so higher contour interiors become raised terrain plates instead of staying on lower bands.
 - Interpolate USGS contour terrain from full contour line segments and increase contour-source grid density so terraced breaks follow izohypse paths more closely.
 - Added contour interval metadata from USGS contour features and render contour-sourced terrain as terraced layer-cake topography instead of a smooth DEM surface.

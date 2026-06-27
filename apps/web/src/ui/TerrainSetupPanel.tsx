@@ -4,7 +4,7 @@
  * description: Upload-first orthophoto setup with sequential corner coordinate prompts.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: added mesh source selector for contour or DEM terrain generation
+ * last-change: display contour source diagnostics after terrain generation
  * ---end-metadata---
  */
 import { ChevronDown, ChevronUp, CloudUpload, Image } from "lucide-react";
@@ -180,6 +180,43 @@ export function TerrainSetupPanel() {
                 <span>Height source</span>
                 <strong>{terrain.elevationProvider}</strong>
               </div>
+              {terrain.contourDiagnostics ? (
+                <>
+                  <div>
+                    <span>Contour data</span>
+                    <strong>
+                      {terrain.contourDiagnostics.featureCount} features,{" "}
+                      {terrain.contourDiagnostics.pathCount} paths
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Path topology</span>
+                    <strong>
+                      {terrain.contourDiagnostics.closedPathCount} closed,{" "}
+                      {terrain.contourDiagnostics.openPathCount} open,{" "}
+                      {terrain.contourDiagnostics.ringCount} rings
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Segments</span>
+                    <strong>
+                      {terrain.contourDiagnostics.segmentCount} contour segments
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Elevations</span>
+                    <strong>
+                      {formatElevationList(terrain.contourDiagnostics.elevations)}
+                    </strong>
+                  </div>
+                  {terrain.contourInterval ? (
+                    <div>
+                      <span>Interval</span>
+                      <strong>{terrain.contourInterval}m</strong>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
               <div>
                 <span>Generated</span>
                 <strong>{new Date(terrain.generatedAt).toLocaleDateString()}</strong>
@@ -190,6 +227,27 @@ export function TerrainSetupPanel() {
       ) : null}
     </section>
   );
+}
+
+function formatElevationList(elevations: number[]) {
+  if (elevations.length === 0) {
+    return "No elevation attributes";
+  }
+
+  if (elevations.length <= 10) {
+    return elevations.map((elevation) => `${elevation}m`).join(", ");
+  }
+
+  const firstValues = elevations
+    .slice(0, 5)
+    .map((elevation) => `${elevation}m`)
+    .join(", ");
+  const lastValues = elevations
+    .slice(-3)
+    .map((elevation) => `${elevation}m`)
+    .join(", ");
+
+  return `${firstValues}, ... ${lastValues}`;
 }
 
 function getAccuracyLabel(status: string) {

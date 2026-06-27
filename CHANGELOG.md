@@ -3,13 +3,15 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged locked 2D top view and clean empty startup state
+last-change: logged terrain generation backend contract
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Added shared terrain generation contracts plus a deterministic sample external DEM provider for Checkpoint 1 backend work.
+- Added an MCP `terrain_generate` tool that returns project metadata, a generated terrain model, and base orthophoto/terrain layers from corner coordinates.
 - Locked the 2D canvas mode to a clean orthographic top view with rotation and pan disabled, while preserving the default 3D perspective/orbit mode.
 - Reset the initial editor state to a clean empty canvas and empty layer stack so new projects no longer show demo terrain or demo layers.
 

@@ -1,10 +1,14 @@
 /*
  * type: app-source
- * description: MCP server exposing Landschaft planning editor read and write tools.
- * last-updated: 2026-06-24
+ * description: MCP server exposing Landschaft planning editor terrain and map tools.
+ * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: added initial MCP stdio server
+ * last-change: added checkpoint 1 terrain generation tool
  */
+import {
+  generateTerrainProject,
+  TerrainGenerationRequestSchema
+} from "@landschaft/shared";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -13,6 +17,20 @@ const server = new McpServer({
   name: "landschaft",
   version: "0.1.0"
 });
+
+server.tool(
+  "terrain_generate",
+  "Generate project metadata, a heightmap terrain model, and base layers from orthophoto corner coordinates.",
+  TerrainGenerationRequestSchema.shape,
+  async (request) => ({
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(generateTerrainProject(request), null, 2)
+      }
+    ]
+  })
+);
 
 server.tool(
   "map_read",

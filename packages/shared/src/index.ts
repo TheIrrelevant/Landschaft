@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: added Open-Meteo elevation provider adapter
+ * last-change: throttle and retry Open-Meteo elevation requests
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -343,7 +343,7 @@ export const openMeteoElevationProvider: ElevationProvider = {
     const batches = chunkArray(points, 100);
     const elevations: number[] = [];
 
-    for (const batch of batches) {
+    for (const [batchIndex, batch] of batches.entries()) {
       const url = new URL("https://api.open-meteo.com/v1/elevation");
       url.searchParams.set(
         "latitude",
@@ -354,7 +354,7 @@ export const openMeteoElevationProvider: ElevationProvider = {
         batch.map((point) => point.longitude.toFixed(6)).join(",")
       );
 
-      const response = await fetch(url);
+      const response = await fetchWithRetry(url);
       if (!response.ok) {
         throw new Error(`Open-Meteo elevation request failed: ${response.status}`);
       }
@@ -373,11 +373,40 @@ export const openMeteoElevationProvider: ElevationProvider = {
           return value;
         })
       );
+
+      if (batchIndex < batches.length - 1) {
+        await delay(250);
+      }
     }
 
     return elevations;
   }
 };
+
+async function fetchWithRetry(url: URL) {
+  let response = await fetch(url);
+
+  for (let attempt = 0; attempt < 2 && shouldRetry(response); attempt += 1) {
+    const retryAfterSeconds = Number(response.headers.get("retry-after"));
+    const retryDelay = Number.isFinite(retryAfterSeconds)
+      ? retryAfterSeconds * 1000
+      : 900 * (attempt + 1);
+    await delay(retryDelay);
+    response = await fetch(url);
+  }
+
+  return response;
+}
+
+function shouldRetry(response: Response) {
+  return response.status === 429 || response.status >= 500;
+}
+
+function delay(milliseconds: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
 
 function createBaseLayers(): PlanningLayer[] {
   return [

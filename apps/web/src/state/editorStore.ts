@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: generate terrain asynchronously with Open-Meteo elevation data
+ * last-change: use fast-preview Open-Meteo terrain requests by default
  * ---end-metadata---
  */
 import {
@@ -99,7 +99,7 @@ function createTerrainRequest(project: ProjectMetadata): TerrainGenerationReques
     coordinateReferenceSystem: project.coordinateReferenceSystem,
     sourceImageName: project.sourceImageName,
     corners: project.corners,
-    quality: "balanced",
+    quality: "fast-preview",
     heightSource: "open-meteo"
   };
 }

@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: interpolate USGS contour terrain from contour line segments
+ * last-change: lift closed contour ring interiors to their contour elevation
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -355,6 +355,11 @@ type ContourSegment = {
   interval?: number;
 };
 
+type ContourRing = {
+  points: TerrainSamplePoint[];
+  elevation: number;
+};
+
 async function generateTerrainModelFromUsgsContours(
   request: NormalizedTerrainGenerationRequest,
   generatedAt = new Date().toISOString()
@@ -362,7 +367,8 @@ async function generateTerrainModelFromUsgsContours(
   const extent = getExtentMeters(request.corners);
   const gridSize = getContourGridSizeForQuality(request.quality);
   const samplePoints = createGridSamplePoints(request.corners, gridSize);
-  const contourSegments = await fetchUsgsContourSegments(request.corners);
+  const { rings: contourRings, segments: contourSegments } =
+    await fetchUsgsContourGeometry(request.corners);
 
   if (contourSegments.length === 0) {
     throw new Error(
@@ -373,7 +379,11 @@ async function generateTerrainModelFromUsgsContours(
   const rawHeightmap = samplePoints.map((point) =>
     interpolateElevationFromContours(point, contourSegments)
   );
-  const heightmap = smoothHeightmap(rawHeightmap, gridSize, 1);
+  const heightmap = applyClosedContourRings(
+    smoothHeightmap(rawHeightmap, gridSize, 1),
+    samplePoints,
+    contourRings
+  );
   const contourInterval = inferContourInterval(contourSegments);
 
   return {
@@ -390,7 +400,7 @@ async function generateTerrainModelFromUsgsContours(
   };
 }
 
-async function fetchUsgsContourSegments(corners: OrthophotoCorner[]) {
+async function fetchUsgsContourGeometry(corners: OrthophotoCorner[]) {
   const bbox = getBoundingBox(corners);
   const url = new URL(
     "https://carto.nationalmap.gov/arcgis/rest/services/contours/MapServer/26/query"
@@ -416,6 +426,7 @@ async function fetchUsgsContourSegments(corners: OrthophotoCorner[]) {
 
   const payload = (await response.json()) as { features?: UsgsContourFeature[] };
   const features = payload.features ?? [];
+  const rings: ContourRing[] = [];
   const segments: ContourSegment[] = [];
 
   for (const feature of features) {
@@ -426,6 +437,14 @@ async function fetchUsgsContourSegments(corners: OrthophotoCorner[]) {
     }
 
     for (const path of feature.geometry?.paths ?? []) {
+      const pathPoints = toTerrainSamplePath(path);
+      if (isClosedContourPath(pathPoints)) {
+        rings.push({
+          points: pathPoints.slice(0, -1),
+          elevation
+        });
+      }
+
       for (let index = 0; index < path.length - 1; index += 1) {
         const [startLongitude, startLatitude] = path[index] ?? [];
         const [endLongitude, endLatitude] = path[index + 1] ?? [];
@@ -448,7 +467,95 @@ async function fetchUsgsContourSegments(corners: OrthophotoCorner[]) {
     }
   }
 
-  return segments;
+  return { rings, segments };
+}
+
+function toTerrainSamplePath(path: number[][]) {
+  return path.flatMap((coordinate): TerrainSamplePoint[] => {
+    const [longitude, latitude] = coordinate;
+    if (typeof latitude !== "number" || typeof longitude !== "number") {
+      return [];
+    }
+
+    return [{ latitude, longitude }];
+  });
+}
+
+function isClosedContourPath(path: TerrainSamplePoint[]) {
+  if (path.length < 4) {
+    return false;
+  }
+
+  const first = path[0];
+  const last = path[path.length - 1];
+  if (!first || !last) {
+    return false;
+  }
+
+  return getCoordinateDistanceMeters(first, last) < 3;
+}
+
+function applyClosedContourRings(
+  heightmap: number[],
+  samplePoints: TerrainSamplePoint[],
+  rings: ContourRing[]
+) {
+  if (rings.length === 0) {
+    return heightmap;
+  }
+
+  return heightmap.map((height, index) => {
+    const point = samplePoints[index];
+    if (!point) {
+      return height;
+    }
+
+    let ringHeight = height;
+    for (const ring of rings) {
+      if (isPointInContourRing(point, ring.points)) {
+        ringHeight = Math.max(ringHeight, ring.elevation);
+      }
+    }
+
+    return Number(ringHeight.toFixed(2));
+  });
+}
+
+function isPointInContourRing(
+  point: TerrainSamplePoint,
+  ring: TerrainSamplePoint[]
+) {
+  let inside = false;
+
+  for (
+    let currentIndex = 0, previousIndex = ring.length - 1;
+    currentIndex < ring.length;
+    previousIndex = currentIndex, currentIndex += 1
+  ) {
+    const current = ring[currentIndex];
+    const previous = ring[previousIndex];
+    if (!current || !previous) {
+      continue;
+    }
+
+    const crossesLatitude =
+      current.latitude > point.latitude !== previous.latitude > point.latitude;
+    if (!crossesLatitude) {
+      continue;
+    }
+
+    const intersectionLongitude =
+      ((previous.longitude - current.longitude) *
+        (point.latitude - current.latitude)) /
+        (previous.latitude - current.latitude) +
+      current.longitude;
+
+    if (point.longitude < intersectionLongitude) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
 }
 
 function interpolateElevationFromContours(

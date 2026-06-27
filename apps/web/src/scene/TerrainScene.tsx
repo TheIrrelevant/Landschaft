@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: render contour terraces as polygon extrusions
+ * last-change: skip base contour terrace polygons in renderer
  * ---end-metadata---
  */
 import {
@@ -294,9 +294,9 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
 }
 
 function buildContourTerraceGeometry(terrain: TerrainModel, space: TerrainSpace) {
-  const terraces = [...(terrain.contourTerraces ?? [])].sort(
-    (a, b) => a.elevation - b.elevation
-  );
+  const terraces = [...(terrain.contourTerraces ?? [])]
+    .sort((a, b) => a.elevation - b.elevation)
+    .filter((terrace) => terrace.elevation > terrain.minElevation);
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];

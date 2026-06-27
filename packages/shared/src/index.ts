@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: add contour terrace polygons to terrain models
+ * last-change: exclude base elevation from contour terrace polygons
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -437,7 +437,13 @@ async function generateTerrainModelFromUsgsContours(
     contourRings
   );
   const contourInterval = inferContourInterval(contourSegments);
-  const contourTerraces = createContourTerraces(request.corners, contourRings);
+  const minElevation = Math.min(...heightmap);
+  const maxElevation = Math.max(...heightmap);
+  const contourTerraces = createContourTerraces(
+    request.corners,
+    contourRings,
+    minElevation
+  );
 
   return {
     accuracyStatus: "external-dem",
@@ -445,8 +451,8 @@ async function generateTerrainModelFromUsgsContours(
     gridSize,
     width: extent.width,
     depth: extent.depth,
-    minElevation: Math.min(...heightmap),
-    maxElevation: Math.max(...heightmap),
+    minElevation,
+    maxElevation,
     ...(contourInterval ? { contourInterval } : {}),
     contourTerraces,
     contourDiagnostics,
@@ -627,13 +633,15 @@ function applyClosedContourRings(
 
 function createContourTerraces(
   corners: OrthophotoCorner[],
-  rings: ContourRing[]
+  rings: ContourRing[],
+  baseElevation: number
 ) {
   const bbox = getBoundingBox(corners);
   const longitudeSpan = Math.max(bbox.maxLongitude - bbox.minLongitude, 0.000001);
   const latitudeSpan = Math.max(bbox.maxLatitude - bbox.minLatitude, 0.000001);
 
   return rings
+    .filter((ring) => ring.elevation > baseElevation)
     .map((ring) => ({
       elevation: ring.elevation,
       points: ring.points

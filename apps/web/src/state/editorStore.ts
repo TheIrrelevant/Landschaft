@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: use fast-preview Open-Meteo terrain requests by default
+ * last-change: orthophoto-first layer flow with selectable terrain source
  * ---end-metadata---
  */
 import {
@@ -17,6 +17,7 @@ import {
   type ProjectMetadata,
   type ProjectSnapshot,
   type TerrainGenerationRequest,
+  type TerrainHeightSource,
   type TerrainModel
 } from "@landschaft/shared";
 import { create } from "zustand";
@@ -39,6 +40,7 @@ interface EditorState {
   terrainGenerated: boolean;
   terrainGenerating: boolean;
   terrainGenerationError: string | null;
+  terrainHeightSource: TerrainHeightSource;
   orthophotoPreviewUrl: string | null;
   selectedArea: CodedArea | null;
   selectedLayerId: string | null;
@@ -60,6 +62,7 @@ interface EditorState {
   selectArea: (area: CodedArea | null) => void;
   selectLayer: (layerId: string) => void;
   setMode: (mode: EditorMode) => void;
+  setTerrainHeightSource: (heightSource: TerrainHeightSource) => void;
   setOrthophotoPreview: (fileName: string, previewUrl: string) => void;
   setLayerOpacity: (layerId: string, opacity: number) => void;
   toggleLayer: (layerId: string) => void;
@@ -92,7 +95,21 @@ function createProject(corners: OrthophotoCorner[], sourceImageName?: string) {
   }).project;
 }
 
-function createTerrainRequest(project: ProjectMetadata): TerrainGenerationRequest {
+function createOrthophotoLayer(): PlanningLayer {
+  return {
+    id: "orthophoto-base",
+    name: "Orthophoto Base",
+    kind: "orthophoto",
+    visible: true,
+    opacity: 1,
+    reviewStatus: "draft"
+  };
+}
+
+function createTerrainRequest(
+  project: ProjectMetadata,
+  heightSource: TerrainHeightSource
+): TerrainGenerationRequest {
   return {
     projectId: project.id,
     projectName: project.name,
@@ -100,7 +117,7 @@ function createTerrainRequest(project: ProjectMetadata): TerrainGenerationReques
     sourceImageName: project.sourceImageName,
     corners: project.corners,
     quality: "fast-preview",
-    heightSource: "open-meteo"
+    heightSource
   };
 }
 
@@ -162,6 +179,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   terrainGenerated: storedProjectSnapshot?.terrainGenerated ?? false,
   terrainGenerating: false,
   terrainGenerationError: null,
+  terrainHeightSource: "usgs-contours",
   orthophotoPreviewUrl: null,
   coordinateStep: storedProjectSnapshot?.coordinateStep ?? null,
   inspectorOpen: false,
@@ -181,13 +199,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     try {
       const result = await generateTerrainProjectAsync(
-        createTerrainRequest(state.project)
+        createTerrainRequest(state.project, state.terrainHeightSource)
+      );
+      const layers = result.baseLayers.map((layer) =>
+        layer.id === "orthophoto-base"
+          ? { ...layer, visible: false }
+          : { ...layer, visible: true }
       );
       const nextState = {
         project: result.project,
         terrain: result.terrain,
-        layers: result.baseLayers,
-        selectedLayerId: result.baseLayers[0]?.id ?? null,
+        layers,
+        selectedLayerId: "terrain-mesh",
         selectedArea: null,
         terrainGenerated: true,
         inspectorOpen: false,
@@ -246,6 +269,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
   setMode: (mode) => set({ activeMode: mode }),
   setViewScaleMode: (mode) => set({ viewScaleMode: mode }),
+  setTerrainHeightSource: (heightSource) =>
+    set({ terrainHeightSource: heightSource }),
   setOrthophotoPreview: (fileName, previewUrl) =>
     set((state) => {
       if (state.orthophotoPreviewUrl) {
@@ -253,15 +278,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       clearProjectSnapshot();
 
+      const layers = [createOrthophotoLayer()];
+
       return {
+        activeMode: "top-view",
         coordinateStep: 0,
         orthophotoPreviewUrl: previewUrl,
         project: {
           ...state.project,
           sourceImageName: fileName
         },
-        layers: [],
-        selectedLayerId: null,
+        layers,
+        selectedLayerId: "orthophoto-base",
         selectedArea: null,
         terrainGenerated: false,
         terrainGenerationError: null,

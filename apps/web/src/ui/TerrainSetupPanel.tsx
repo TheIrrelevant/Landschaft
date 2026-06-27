@@ -4,7 +4,7 @@
  * description: Upload-first orthophoto setup with sequential corner coordinate prompts.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: show explicit terrain accuracy and source metadata
+ * last-change: added mesh source selector for contour or DEM terrain generation
  * ---end-metadata---
  */
 import { ChevronDown, ChevronUp, CloudUpload, Image } from "lucide-react";
@@ -19,9 +19,11 @@ export function TerrainSetupPanel() {
     project,
     setCornerCoordinate,
     setOrthophotoPreview,
+    setTerrainHeightSource,
     terrain,
     terrainGenerating,
-    terrainGenerationError
+    terrainGenerationError,
+    terrainHeightSource
   } = useEditorStore();
   const [sectionOpen, setSectionOpen] = useState(true);
   const activeCorner =
@@ -73,6 +75,23 @@ export function TerrainSetupPanel() {
           <p className="upload-note">
             After upload, coordinates are requested from top-left clockwise.
           </p>
+
+          <label className="terrain-source-control">
+            <span>Mesh source</span>
+            <select
+              onChange={(event) => {
+                setTerrainHeightSource(
+                  event.target.value === "open-meteo"
+                    ? "open-meteo"
+                    : "usgs-contours"
+                );
+              }}
+              value={terrainHeightSource}
+            >
+              <option value="usgs-contours">Izohips / USGS contours</option>
+              <option value="open-meteo">External DEM fallback</option>
+            </select>
+          </label>
 
           <div className={`coordinate-step ${activeCorner ? "" : "disabled"}`}>
             <span className="step-badge">

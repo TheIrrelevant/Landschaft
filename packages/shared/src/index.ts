@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: throttle and retry Open-Meteo elevation requests
+ * last-change: added USGS contour-source terrain generation
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -107,6 +107,7 @@ export type TerrainGenerationQuality = z.infer<
 
 export const TerrainHeightSourceSchema = z.enum([
   "open-meteo",
+  "usgs-contours",
   "sample-external-dem",
   "flat"
 ]);
@@ -277,6 +278,17 @@ export async function generateTerrainProjectAsync(
 ): Promise<TerrainGenerationResult> {
   const request = TerrainGenerationRequestSchema.parse(input);
 
+  if (request.heightSource === "usgs-contours") {
+    const project = createProjectMetadata(request);
+    const terrain = await generateTerrainModelFromUsgsContours(request, generatedAt);
+
+    return {
+      project,
+      terrain,
+      baseLayers: createBaseLayers()
+    };
+  }
+
   if (request.heightSource !== "open-meteo") {
     return generateTerrainProject(request, generatedAt);
   }
@@ -322,6 +334,132 @@ export async function generateTerrainModelFromProvider(
     heightmap,
     generatedAt
   };
+}
+
+type UsgsContourFeature = {
+  attributes?: {
+    contourelevation?: unknown;
+    contourinterval?: unknown;
+  };
+  geometry?: {
+    paths?: number[][][];
+  };
+};
+
+type ContourSample = {
+  latitude: number;
+  longitude: number;
+  elevation: number;
+};
+
+async function generateTerrainModelFromUsgsContours(
+  request: NormalizedTerrainGenerationRequest,
+  generatedAt = new Date().toISOString()
+): Promise<TerrainModel> {
+  const extent = getExtentMeters(request.corners);
+  const gridSize = getGridSizeForQuality(request.quality);
+  const samplePoints = createGridSamplePoints(request.corners, gridSize);
+  const contourSamples = await fetchUsgsContourSamples(request.corners);
+
+  if (contourSamples.length === 0) {
+    throw new Error(
+      "No USGS contour lines with elevation attributes were found for this extent."
+    );
+  }
+
+  const heightmap = samplePoints.map((point) =>
+    interpolateElevationFromContours(point, contourSamples)
+  );
+
+  return {
+    accuracyStatus: "external-dem",
+    elevationProvider: "USGS National Map Contours",
+    gridSize,
+    width: extent.width,
+    depth: extent.depth,
+    minElevation: Math.min(...heightmap),
+    maxElevation: Math.max(...heightmap),
+    heightmap,
+    generatedAt
+  };
+}
+
+async function fetchUsgsContourSamples(corners: OrthophotoCorner[]) {
+  const bbox = getBoundingBox(corners);
+  const url = new URL(
+    "https://carto.nationalmap.gov/arcgis/rest/services/contours/MapServer/26/query"
+  );
+  url.searchParams.set("f", "json");
+  url.searchParams.set("where", "1=1");
+  url.searchParams.set("outFields", "contourelevation,contourinterval");
+  url.searchParams.set("returnGeometry", "true");
+  url.searchParams.set(
+    "geometry",
+    `${bbox.minLongitude},${bbox.minLatitude},${bbox.maxLongitude},${bbox.maxLatitude}`
+  );
+  url.searchParams.set("geometryType", "esriGeometryEnvelope");
+  url.searchParams.set("inSR", "4326");
+  url.searchParams.set("outSR", "4326");
+  url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
+  url.searchParams.set("resultRecordCount", "2000");
+
+  const response = await fetchWithRetry(url);
+  if (!response.ok) {
+    throw new Error(`USGS contour request failed: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as { features?: UsgsContourFeature[] };
+  const features = payload.features ?? [];
+  const samples: ContourSample[] = [];
+
+  for (const feature of features) {
+    const elevation = feature.attributes?.contourelevation;
+    if (typeof elevation !== "number") {
+      continue;
+    }
+
+    for (const path of feature.geometry?.paths ?? []) {
+      for (const coordinate of path) {
+        const [longitude, latitude] = coordinate;
+        if (typeof latitude !== "number" || typeof longitude !== "number") {
+          continue;
+        }
+
+        samples.push({ latitude, longitude, elevation });
+      }
+    }
+  }
+
+  return samples;
+}
+
+function interpolateElevationFromContours(
+  point: TerrainSamplePoint,
+  contours: ContourSample[]
+) {
+  const nearest = contours
+    .map((contour) => ({
+      elevation: contour.elevation,
+      distance: getCoordinateDistanceMeters(point, contour)
+    }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 8);
+
+  const exact = nearest.find((sample) => sample.distance < 0.5);
+  if (exact) {
+    return exact.elevation;
+  }
+
+  let weightedElevation = 0;
+  let totalWeight = 0;
+
+  for (const sample of nearest) {
+    const weight = 1 / Math.max(sample.distance * sample.distance, 1);
+    weightedElevation += sample.elevation * weight;
+    totalWeight += weight;
+  }
+
+  return Number((weightedElevation / totalWeight).toFixed(2));
 }
 
 export function getExtentMeters(corners: OrthophotoCorner[]) {
@@ -504,6 +642,13 @@ function getDistanceMeters(
   start: Pick<OrthophotoCorner, "latitude" | "longitude">,
   end: Pick<OrthophotoCorner, "latitude" | "longitude">
 ) {
+  return getCoordinateDistanceMeters(start, end);
+}
+
+function getCoordinateDistanceMeters(
+  start: Pick<OrthophotoCorner, "latitude" | "longitude">,
+  end: Pick<OrthophotoCorner, "latitude" | "longitude">
+) {
   const metersPerDegreeLatitude = 111_320;
   const averageLatitude = ((start.latitude + end.latitude) / 2) * (Math.PI / 180);
   const metersPerDegreeLongitude =
@@ -513,6 +658,18 @@ function getDistanceMeters(
     (end.longitude - start.longitude) * metersPerDegreeLongitude;
 
   return Math.hypot(deltaLatitude, deltaLongitude);
+}
+
+function getBoundingBox(corners: OrthophotoCorner[]) {
+  const latitudes = corners.map((corner) => corner.latitude);
+  const longitudes = corners.map((corner) => corner.longitude);
+
+  return {
+    minLatitude: Math.min(...latitudes),
+    maxLatitude: Math.max(...latitudes),
+    minLongitude: Math.min(...longitudes),
+    maxLongitude: Math.max(...longitudes)
+  };
 }
 
 function getGridSizeForQuality(quality: TerrainGenerationQuality) {

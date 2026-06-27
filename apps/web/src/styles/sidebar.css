@@ -4,7 +4,7 @@
  * description: Sidebar, orthophoto setup, and user panel styles for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: explicit terrain metadata summary styling
+ * last-change: mesh source selector styling
  * ---end-metadata---
  */
 .sidebar {
@@ -165,6 +165,33 @@
   font-weight: var(--font-weight-regular);
   line-height: 1.45;
   margin: 0;
+}
+
+.terrain-source-control {
+  display: grid;
+  gap: 6px;
+}
+
+.terrain-source-control span {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.terrain-source-control select {
+  appearance: none;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
+  color: var(--color-text-primary);
+  font-size: 12.5px;
+  font-weight: var(--font-weight-medium);
+  min-height: 34px;
+  padding: 7px 9px;
+  width: 100%;
 }
 
 .coordinate-step {

@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: render contour-sourced terrain as terraced layers
+ * last-change: render terrain elevations from absolute source metres
  * ---end-metadata---
  */
 import {
@@ -111,7 +111,7 @@ type TerrainSpace = {
   sizeZ: number;
   /** elevation span in metres */
   rangeMeters: number;
-  /** lowest surface point in scene units (terrain min is lifted to y=0) */
+  /** solid base position in scene units below absolute elevation zero */
   baseY: number;
 };
 
@@ -320,9 +320,8 @@ function normalizedGridToLocal(
 }
 
 /**
- * Surface height for a cell, in scene units. Real elevation above the terrain
- * minimum (metres) scaled uniformly by displayScale — same factor as the
- * horizontal axes, so vertical proportions are true (no exaggeration).
+ * Surface height for a cell, in scene units. Source elevation values stay on
+ * their absolute metre datum instead of being normalized to the terrain minimum.
  */
 function sampleHeightAt(
   terrain: TerrainModel,
@@ -331,7 +330,7 @@ function sampleHeightAt(
   v: number
 ) {
   const elevation = sampleElevationAt(terrain, u, v);
-  return (elevation - terrain.minElevation) * space.displayScale * space.verticalScale;
+  return elevation * space.displayScale * space.verticalScale;
 }
 
 function sampleTerracedHeightAt(
@@ -341,7 +340,7 @@ function sampleTerracedHeightAt(
   v: number
 ) {
   const elevation = sampleTerracedElevationAt(terrain, u, v);
-  return (elevation - terrain.minElevation) * space.displayScale * space.verticalScale;
+  return elevation * space.displayScale * space.verticalScale;
 }
 
 function sampleElevationAt(terrain: TerrainModel, u: number, v: number) {
@@ -410,13 +409,15 @@ function buildContourGeometry(terrain: TerrainModel, space: TerrainSpace) {
   const grid = getRenderGridSize(terrain);
   const positions: number[] = [];
 
-  // Surface spans y = 0 (terrain min) .. rangeMeters * displayScale (terrain max).
-  const surfaceMax = space.rangeMeters * space.displayScale * space.verticalScale;
-  const step = surfaceMax / (CONTOUR_LEVELS + 1);
+  const surfaceMin =
+    terrain.minElevation * space.displayScale * space.verticalScale;
+  const surfaceMax =
+    terrain.maxElevation * space.displayScale * space.verticalScale;
+  const step = (surfaceMax - surfaceMin) / (CONTOUR_LEVELS + 1);
   const lift = CONTOUR_LIFT * Math.max(space.displayScale, 0.0001) * 50;
 
   for (let level = 1; level <= CONTOUR_LEVELS; level += 1) {
-    const threshold = step * level;
+    const threshold = surfaceMin + step * level;
 
     for (let gy = 0; gy < grid - 1; gy += 1) {
       for (let gx = 0; gx < grid - 1; gx += 1) {

@@ -82,6 +82,7 @@ const CONTOUR_COLOR = "#969696";
 // underlying data stays in true metres; displayScale only affects presentation.
 // 1:1 viewing = override displayScale to 1.
 const TARGET_SCENE_SPAN = 40;
+const RENDER_TERRAIN_GRID_SIZE = 129;
 const CONTOUR_LEVELS = 14;
 const CONTOUR_LIFT = 0.012;
 const FIT_VERTICAL_EXAGGERATION = 2.4;
@@ -142,15 +143,19 @@ type Vec3 = [number, number, number];
  * winding for the walls/base, and computeVertexNormals for smooth top shading.
  */
 function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
-  const grid = terrain.gridSize;
+  const grid = getRenderGridSize(terrain);
   const positions: number[] = [];
   const uvs: number[] = [];
   const baseY = space.baseY;
+  const last = grid - 1;
 
-  const top = (gx: number, gy: number): Vec3 =>
-    gridToLocal(gx, gy, cellHeight(terrain, space, gy * grid + gx), terrain, space);
+  const top = (gx: number, gy: number): Vec3 => {
+    const u = gx / last;
+    const v = gy / last;
+    return normalizedGridToLocal(u, v, sampleHeightAt(terrain, space, u, v), space);
+  };
   const bottom = (gx: number, gy: number): Vec3 => {
-    const t = gridToLocal(gx, gy, 0, terrain, space);
+    const t = gridCoordToLocal(gx, gy, grid, 0, space);
     return [t[0], baseY, t[2]];
   };
   // tri pushes one triangle with its three UVs.
@@ -166,7 +171,6 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
     uvs.push(uvA[0], uvA[1], uvB[0], uvB[1], uvC[0], uvC[1]);
   };
 
-  const last = grid - 1;
   const gridUv = (gx: number, gy: number): [number, number] => [gx / last, gy / last];
 
   // --- GROUP 0: Top surface (fabric) ---
@@ -256,16 +260,24 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
  * are already metres * displayScale, so this places contour lines and the mesh
  * in the exact same space.
  */
-function gridToLocal(
+function gridCoordToLocal(
   gx: number,
   gy: number,
+  grid: number,
   height: number,
-  terrain: TerrainModel,
   space: TerrainSpace
 ): [number, number, number] {
-  const grid = terrain.gridSize;
   const u = gx / (grid - 1);
   const v = gy / (grid - 1);
+  return normalizedGridToLocal(u, v, height, space);
+}
+
+function normalizedGridToLocal(
+  u: number,
+  v: number,
+  height: number,
+  space: TerrainSpace
+): [number, number, number] {
   const x = (u - 0.5) * space.sizeX;
   const z = (v - 0.5) * space.sizeZ;
   return [x, height, z];
@@ -276,9 +288,51 @@ function gridToLocal(
  * minimum (metres) scaled uniformly by displayScale — same factor as the
  * horizontal axes, so vertical proportions are true (no exaggeration).
  */
-function cellHeight(terrain: TerrainModel, space: TerrainSpace, index: number) {
-  const elevation = terrain.heightmap[index] ?? terrain.minElevation;
+function sampleHeightAt(
+  terrain: TerrainModel,
+  space: TerrainSpace,
+  u: number,
+  v: number
+) {
+  const elevation = sampleElevationAt(terrain, u, v);
   return (elevation - terrain.minElevation) * space.displayScale * space.verticalScale;
+}
+
+function sampleElevationAt(terrain: TerrainModel, u: number, v: number) {
+  const sourceGrid = terrain.gridSize;
+  const sourceLast = sourceGrid - 1;
+  const sourceX = clamp(u, 0, 1) * sourceLast;
+  const sourceY = clamp(v, 0, 1) * sourceLast;
+  const x0 = Math.floor(sourceX);
+  const y0 = Math.floor(sourceY);
+  const x1 = Math.min(x0 + 1, sourceLast);
+  const y1 = Math.min(y0 + 1, sourceLast);
+  const tx = sourceX - x0;
+  const ty = sourceY - y0;
+  const h00 = heightmapValueAt(terrain, x0, y0);
+  const h10 = heightmapValueAt(terrain, x1, y0);
+  const h01 = heightmapValueAt(terrain, x0, y1);
+  const h11 = heightmapValueAt(terrain, x1, y1);
+  const north = lerp(h00, h10, tx);
+  const south = lerp(h01, h11, tx);
+
+  return lerp(north, south, ty);
+}
+
+function heightmapValueAt(terrain: TerrainModel, gx: number, gy: number) {
+  return terrain.heightmap[gy * terrain.gridSize + gx] ?? terrain.minElevation;
+}
+
+function getRenderGridSize(terrain: TerrainModel) {
+  return Math.max(terrain.gridSize, RENDER_TERRAIN_GRID_SIZE);
+}
+
+function lerp(start: number, end: number, amount: number) {
+  return start + (end - start) * amount;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 /**
@@ -289,7 +343,7 @@ function cellHeight(terrain: TerrainModel, space: TerrainSpace, index: number) {
  * directly in local scene space so they sit on the 3D surface.
  */
 function buildContourGeometry(terrain: TerrainModel, space: TerrainSpace) {
-  const grid = terrain.gridSize;
+  const grid = getRenderGridSize(terrain);
   const positions: number[] = [];
 
   // Surface spans y = 0 (terrain min) .. rangeMeters * displayScale (terrain max).
@@ -302,15 +356,16 @@ function buildContourGeometry(terrain: TerrainModel, space: TerrainSpace) {
 
     for (let gy = 0; gy < grid - 1; gy += 1) {
       for (let gx = 0; gx < grid - 1; gx += 1) {
-        const i00 = gy * grid + gx;
-        const i10 = gy * grid + (gx + 1);
-        const i01 = (gy + 1) * grid + gx;
-        const i11 = (gy + 1) * grid + (gx + 1);
-
-        const h00 = cellHeight(terrain, space, i00);
-        const h10 = cellHeight(terrain, space, i10);
-        const h01 = cellHeight(terrain, space, i01);
-        const h11 = cellHeight(terrain, space, i11);
+        const last = grid - 1;
+        const h00 = sampleHeightAt(terrain, space, gx / last, gy / last);
+        const h10 = sampleHeightAt(terrain, space, (gx + 1) / last, gy / last);
+        const h01 = sampleHeightAt(terrain, space, gx / last, (gy + 1) / last);
+        const h11 = sampleHeightAt(
+          terrain,
+          space,
+          (gx + 1) / last,
+          (gy + 1) / last
+        );
 
         // Corner positions in grid coords: TL(gx,gy) TR(gx+1,gy) BL(gx,gy+1) BR(gx+1,gy+1)
         const crossings: Array<[number, number]> = [];
@@ -328,8 +383,8 @@ function buildContourGeometry(terrain: TerrainModel, space: TerrainSpace) {
         for (let c = 0; c + 1 < crossings.length; c += 2) {
           const a = crossings[c];
           const b = crossings[c + 1];
-          const pa = gridToLocal(a[0], a[1], threshold + lift, terrain, space);
-          const pb = gridToLocal(b[0], b[1], threshold + lift, terrain, space);
+          const pa = gridCoordToLocal(a[0], a[1], grid, threshold + lift, space);
+          const pb = gridCoordToLocal(b[0], b[1], grid, threshold + lift, space);
           positions.push(pa[0], pa[1], pa[2], pb[0], pb[1], pb[2]);
         }
       }

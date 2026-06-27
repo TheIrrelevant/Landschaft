@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: locked top-down camera for 2D view mode
+ * last-change: apply uploaded orthophoto preview as terrain top texture
  * ---end-metadata---
  */
 import {
@@ -18,7 +18,7 @@ import {
   type ThreeToJSXElements,
   useThree
 } from "@react-three/fiber";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ACESFilmicToneMapping,
   BufferGeometry,
@@ -27,7 +27,9 @@ import {
   DoubleSide,
   Float32BufferAttribute,
   RepeatWrapping,
-  SRGBColorSpace
+  SRGBColorSpace,
+  TextureLoader,
+  type Texture
 } from "three";
 import * as THREE from "three/webgpu";
 import type { TerrainModel } from "@landschaft/shared";
@@ -418,12 +420,58 @@ function createSolidTerrainTexture() {
   return texture;
 }
 
-function TerrainMesh({ terrain, space }: { terrain: TerrainModel; space: TerrainSpace }) {
+function useOrthophotoTexture(url: string | null) {
+  const [texture, setTexture] = useState<Texture | null>(null);
+
+  useEffect(() => {
+    if (!url) {
+      setTexture(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loader = new TextureLoader();
+    loader.load(url, (loadedTexture) => {
+      if (cancelled) {
+        loadedTexture.dispose();
+        return;
+      }
+
+      loadedTexture.colorSpace = SRGBColorSpace;
+      loadedTexture.anisotropy = 4;
+      loadedTexture.needsUpdate = true;
+      setTexture(loadedTexture);
+    });
+
+    return () => {
+      cancelled = true;
+      setTexture((currentTexture) => {
+        if (currentTexture) {
+          currentTexture.dispose();
+        }
+
+        return null;
+      });
+    };
+  }, [url]);
+
+  return texture;
+}
+
+function TerrainMesh({
+  orthophotoTexture,
+  terrain,
+  space
+}: {
+  orthophotoTexture: Texture | null;
+  terrain: TerrainModel;
+  space: TerrainSpace;
+}) {
   const geometry = useMemo(() => buildTerrainGeometry(terrain, space), [terrain, space]);
   const materials = useMemo(() => {
     const topSurface = new THREE.MeshLambertNodeMaterial({
-      color: new Color(TERRAIN_CLAY),
-      map: createFeltTexture(),
+      color: orthophotoTexture ? new Color("#ffffff") : new Color(TERRAIN_CLAY),
+      map: orthophotoTexture ?? createFeltTexture(),
       side: DoubleSide
     });
     const solid = new THREE.MeshLambertNodeMaterial({
@@ -432,7 +480,7 @@ function TerrainMesh({ terrain, space }: { terrain: TerrainModel; space: Terrain
       side: DoubleSide
     });
     return [topSurface, solid];
-  }, []);
+  }, [orthophotoTexture]);
 
   return (
     <mesh castShadow geometry={geometry} material={materials} receiveShadow />
@@ -516,7 +564,9 @@ function GroundPlane({ baseY }: { baseY: number }) {
 
 function TerrainContent() {
   const terrain = useEditorStore((state) => state.terrain);
+  const orthophotoPreviewUrl = useEditorStore((state) => state.orthophotoPreviewUrl);
   const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
+  const orthophotoTexture = useOrthophotoTexture(orthophotoPreviewUrl);
   const space = useMemo(
     () => getTerrainSpace(terrain, viewScaleMode === "1:1" ? 1 : undefined),
     [terrain, viewScaleMode]
@@ -525,7 +575,11 @@ function TerrainContent() {
   return (
     <>
       <GroundPlane baseY={space.baseY} />
-      <TerrainMesh terrain={terrain} space={space} />
+      <TerrainMesh
+        orthophotoTexture={orthophotoTexture}
+        terrain={terrain}
+        space={space}
+      />
       <ContourLines terrain={terrain} space={space} />
     </>
   );

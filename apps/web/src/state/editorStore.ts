@@ -160,19 +160,25 @@ export const useEditorStore = create<EditorState>((set) => ({
   setMode: (mode) => set({ activeMode: mode }),
   setViewScaleMode: (mode) => set({ viewScaleMode: mode }),
   setOrthophotoPreview: (fileName, previewUrl) =>
-    set((state) => ({
-      coordinateStep: 0,
-      orthophotoPreviewUrl: previewUrl,
-      project: {
-        ...state.project,
-        sourceImageName: fileName
-      },
-      layers: [],
-      selectedLayerId: null,
-      selectedArea: null,
-      terrainGenerated: false,
-      inspectorOpen: false
-    })),
+    set((state) => {
+      if (state.orthophotoPreviewUrl) {
+        URL.revokeObjectURL(state.orthophotoPreviewUrl);
+      }
+
+      return {
+        coordinateStep: 0,
+        orthophotoPreviewUrl: previewUrl,
+        project: {
+          ...state.project,
+          sourceImageName: fileName
+        },
+        layers: [],
+        selectedLayerId: null,
+        selectedArea: null,
+        terrainGenerated: false,
+        inspectorOpen: false
+      };
+    }),
   setLayerOpacity: (layerId, opacity) =>
     set((state) => ({
       layers: state.layers.map((layer) =>

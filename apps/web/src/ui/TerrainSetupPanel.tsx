@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Upload-first orthophoto setup with sequential corner coordinate prompts.
- * last-updated: 2026-06-25
- * last-model: cursor-composer
- * last-change: v3 orthophoto section layout with collapsible header and coordinate card
+ * last-updated: 2026-06-27
+ * last-model: codex-gpt-5
+ * last-change: display generated terrain accuracy from shared terrain state
  * ---end-metadata---
  */
 import { ChevronDown, ChevronUp, CloudUpload, Image } from "lucide-react";
@@ -18,7 +18,8 @@ export function TerrainSetupPanel() {
     generateTerrain,
     project,
     setCornerCoordinate,
-    setOrthophotoPreview
+    setOrthophotoPreview,
+    terrain
   } = useEditorStore();
   const [sectionOpen, setSectionOpen] = useState(true);
   const activeCorner =
@@ -137,7 +138,7 @@ export function TerrainSetupPanel() {
             <div className="terrain-summary">
               <span>{project.realWorldExtentMeters.width}m</span>
               <span>{project.realWorldExtentMeters.depth}m</span>
-              <span>external-dem</span>
+              <span>{terrain.accuracyStatus}</span>
             </div>
           ) : null}
         </div>

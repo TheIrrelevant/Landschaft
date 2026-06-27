@@ -2,19 +2,23 @@
  * ---metadata---
  * type: app-source
  * description: Zustand store for Landschaft editor layers and selected area state.
- * last-updated: 2026-06-25
+ * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: start new projects with empty canvas and layer stack
+ * last-change: generate terrain state through shared backend contract
  * ---end-metadata---
  */
-import type {
-  CodedArea,
-  OrthophotoCorner,
-  PlanningLayer,
-  ProjectMetadata,
-  TerrainModel
+import {
+  generateTerrainProject,
+  type CodedArea,
+  type OrthophotoCorner,
+  type PlanningLayer,
+  type ProjectMetadata,
+  type TerrainGenerationRequest,
+  type TerrainModel
 } from "@landschaft/shared";
 import { create } from "zustand";
+
+type EditorMode = "top-view" | "terrain-3d";
 
 interface EditorState {
   layers: PlanningLayer[];
@@ -26,7 +30,7 @@ interface EditorState {
   selectedLayerId: string | null;
   coordinateStep: number | null;
   inspectorOpen: boolean;
-  activeMode: "top-view" | "terrain-3d";
+  activeMode: EditorMode;
   /** "fit" auto-scales the terrain into the scene; "1:1" shows true metres. */
   viewScaleMode: "fit" | "1:1";
   setViewScaleMode: (mode: EditorState["viewScaleMode"]) => void;
@@ -41,7 +45,7 @@ interface EditorState {
   ) => void;
   selectArea: (area: CodedArea | null) => void;
   selectLayer: (layerId: string) => void;
-  setMode: (mode: EditorState["activeMode"]) => void;
+  setMode: (mode: EditorMode) => void;
   setOrthophotoPreview: (fileName: string, previewUrl: string) => void;
   setLayerOpacity: (layerId: string, opacity: number) => void;
   toggleLayer: (layerId: string) => void;
@@ -54,78 +58,41 @@ const defaultCorners: OrthophotoCorner[] = [
   { label: "SW", latitude: 41.0271, longitude: 29.0141 }
 ];
 
-function createProject(corners: OrthophotoCorner[]): ProjectMetadata {
-  const extent = getExtentMeters(corners);
+const baseTerrainRequest: TerrainGenerationRequest = {
+  projectId: "project-demo",
+  projectName: "Untitled Terrain Project",
+  coordinateReferenceSystem: "EPSG:4326",
+  corners: defaultCorners,
+  quality: "balanced",
+  heightSource: "sample-external-dem"
+};
 
+const initialTerrainProject = generateTerrainProject(baseTerrainRequest);
+
+function createProject(corners: OrthophotoCorner[], sourceImageName?: string) {
+  return generateTerrainProject({
+    ...baseTerrainRequest,
+    sourceImageName,
+    corners
+  }).project;
+}
+
+function createTerrainRequest(project: ProjectMetadata): TerrainGenerationRequest {
   return {
-    id: "project-demo",
-    name: "Untitled Terrain Project",
-    coordinateReferenceSystem: "EPSG:4326",
-    corners,
-    realWorldExtentMeters: extent
+    projectId: project.id,
+    projectName: project.name,
+    coordinateReferenceSystem: project.coordinateReferenceSystem,
+    sourceImageName: project.sourceImageName,
+    corners: project.corners,
+    quality: "balanced",
+    heightSource: "sample-external-dem"
   };
 }
-
-function createTerrain(corners: OrthophotoCorner[]): TerrainModel {
-  const extent = getExtentMeters(corners);
-  const gridSize = 33;
-  const heightmap = Array.from({ length: gridSize * gridSize }, (_, index) => {
-    const x = index % gridSize;
-    const y = Math.floor(index / gridSize);
-    const nx = x / (gridSize - 1);
-    const ny = y / (gridSize - 1);
-    const ridge = Math.sin(nx * Math.PI * 2.4) * 5.8;
-    const drainage = Math.cos((nx + ny) * Math.PI * 1.8) * 3.6;
-    const slope = (1 - ny) * 11.5;
-
-    return Number((ridge + drainage + slope + 42).toFixed(2));
-  });
-
-  return {
-    accuracyStatus: "external-dem",
-    elevationProvider: "Sample external DEM provider",
-    gridSize,
-    width: extent.width,
-    depth: extent.depth,
-    minElevation: Math.min(...heightmap),
-    maxElevation: Math.max(...heightmap),
-    heightmap,
-    generatedAt: new Date().toISOString()
-  };
-}
-
-function getExtentMeters(corners: OrthophotoCorner[]) {
-  const north = corners.find((corner) => corner.label === "NW")!;
-  const east = corners.find((corner) => corner.label === "NE")!;
-  const south = corners.find((corner) => corner.label === "SW")!;
-
-  return {
-    width: Math.max(1, Math.round(getDistanceMeters(north, east))),
-    depth: Math.max(1, Math.round(getDistanceMeters(north, south)))
-  };
-}
-
-function getDistanceMeters(
-  start: Pick<OrthophotoCorner, "latitude" | "longitude">,
-  end: Pick<OrthophotoCorner, "latitude" | "longitude">
-) {
-  const metersPerDegreeLatitude = 111_320;
-  const averageLatitude = ((start.latitude + end.latitude) / 2) * (Math.PI / 180);
-  const metersPerDegreeLongitude =
-    metersPerDegreeLatitude * Math.cos(averageLatitude);
-  const deltaLatitude = (end.latitude - start.latitude) * metersPerDegreeLatitude;
-  const deltaLongitude =
-    (end.longitude - start.longitude) * metersPerDegreeLongitude;
-
-  return Math.hypot(deltaLatitude, deltaLongitude);
-}
-
-const initialProject = createProject(defaultCorners);
 
 export const useEditorStore = create<EditorState>((set) => ({
   layers: [],
-  project: initialProject,
-  terrain: createTerrain(defaultCorners),
+  project: initialTerrainProject.project,
+  terrain: initialTerrainProject.terrain,
   terrainGenerated: false,
   orthophotoPreviewUrl: null,
   coordinateStep: null,
@@ -141,12 +108,20 @@ export const useEditorStore = create<EditorState>((set) => ({
     })),
   closeInspector: () => set({ inspectorOpen: false }),
   generateTerrain: () =>
-    set((state) => ({
-      project: createProject(state.project.corners),
-      terrain: createTerrain(state.project.corners),
-      terrainGenerated: true,
-      coordinateStep: 4
-    })),
+    set((state) => {
+      const result = generateTerrainProject(createTerrainRequest(state.project));
+
+      return {
+        project: result.project,
+        terrain: result.terrain,
+        layers: result.baseLayers,
+        selectedLayerId: result.baseLayers[0]?.id ?? null,
+        selectedArea: null,
+        terrainGenerated: true,
+        inspectorOpen: false,
+        coordinateStep: 4
+      };
+    }),
   reorderLayer: (sourceLayerId, targetLayerId) =>
     set((state) => {
       const sourceIndex = state.layers.findIndex(
@@ -173,10 +148,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       );
 
       return {
-        project: {
-          ...createProject(corners),
-          sourceImageName: state.project.sourceImageName
-        }
+        project: createProject(corners, state.project.sourceImageName)
       };
     }),
   selectArea: (area) => set({ selectedArea: area }),
@@ -194,7 +166,12 @@ export const useEditorStore = create<EditorState>((set) => ({
       project: {
         ...state.project,
         sourceImageName: fileName
-      }
+      },
+      layers: [],
+      selectedLayerId: null,
+      selectedArea: null,
+      terrainGenerated: false,
+      inspectorOpen: false
     })),
   setLayerOpacity: (layerId, opacity) =>
     set((state) => ({

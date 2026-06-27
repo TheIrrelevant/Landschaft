@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged terrain generation backend contract
+last-change: logged web terrain generation contract integration
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Connected the web terrain generation flow to the shared terrain generation contract so generated terrain now creates the base orthophoto and terrain layer stack.
 - Added shared terrain generation contracts plus a deterministic sample external DEM provider for Checkpoint 1 backend work.
 - Added an MCP `terrain_generate` tool that returns project metadata, a generated terrain model, and base orthophoto/terrain layers from corner coordinates.
 - Locked the 2D canvas mode to a clean orthographic top view with rotation and pan disabled, while preserving the default 3D perspective/orbit mode.

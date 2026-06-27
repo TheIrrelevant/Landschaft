@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-style
  * description: Sidebar, orthophoto setup, and user panel styles for the Landschaft editor.
- * last-updated: 2026-06-25
- * last-model: cursor-composer
- * last-change: design system tokens applied across sidebar surfaces and controls
+ * last-updated: 2026-06-27
+ * last-model: codex-gpt-5
+ * last-change: explicit terrain metadata summary styling
  * ---end-metadata---
  */
 .sidebar {
@@ -264,18 +264,36 @@
 
 .terrain-summary {
   border-top: 1px solid var(--color-border);
-  display: flex;
-  gap: 8px;
+  display: grid;
+  gap: 7px;
   padding-top: 9px;
 }
 
-.terrain-summary span {
+.terrain-summary div {
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: 6px;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.terrain-summary span {
   color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.terrain-summary strong {
+  color: var(--color-text-primary);
   font-size: 12px;
-  padding: 3px 6px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .user-panel {

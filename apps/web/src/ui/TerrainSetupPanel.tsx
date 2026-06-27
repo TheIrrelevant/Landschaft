@@ -4,7 +4,7 @@
  * description: Upload-first orthophoto setup with sequential corner coordinate prompts.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: display external elevation generation progress and errors
+ * last-change: show explicit terrain accuracy and source metadata
  * ---end-metadata---
  */
 import { ChevronDown, ChevronUp, CloudUpload, Image } from "lucide-react";
@@ -146,15 +146,46 @@ export function TerrainSetupPanel() {
 
           {coordinatesComplete ? (
             <div className="terrain-summary">
-              <span>{project.realWorldExtentMeters.width}m</span>
-              <span>{project.realWorldExtentMeters.depth}m</span>
-              <span>{terrain.accuracyStatus}</span>
+              <div>
+                <span>Extent</span>
+                <strong>
+                  {project.realWorldExtentMeters.width}m x{" "}
+                  {project.realWorldExtentMeters.depth}m
+                </strong>
+              </div>
+              <div>
+                <span>Accuracy</span>
+                <strong>{getAccuracyLabel(terrain.accuracyStatus)}</strong>
+              </div>
+              <div>
+                <span>Height source</span>
+                <strong>{terrain.elevationProvider}</strong>
+              </div>
+              <div>
+                <span>Generated</span>
+                <strong>{new Date(terrain.generatedAt).toLocaleDateString()}</strong>
+              </div>
             </div>
           ) : null}
         </div>
       ) : null}
     </section>
   );
+}
+
+function getAccuracyLabel(status: string) {
+  switch (status) {
+    case "survey-grade":
+      return "Survey grade";
+    case "external-dem":
+      return "Approximate external DEM";
+    case "conceptual":
+      return "Conceptual";
+    case "flat":
+      return "Flat surface";
+    default:
+      return status;
+  }
 }
 
 function getCornerName(label: string) {

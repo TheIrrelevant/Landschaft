@@ -3,7 +3,7 @@ type: roadmap
 description: Product roadmap for the Landschaft web-based landscape planning editor.
 last-updated: 2026-06-24
 last-model: codex-gpt-5
-last-change: added checkpoint 9 for concept and masterplan
+last-change: marked checkpoint 1 MVP complete
 ---
 
 # Landschaft Roadmap
@@ -235,6 +235,24 @@ Out of scope for the first checkpoint:
 - The system can generate a textured terrain mesh.
 - The system can distinguish survey-grade terrain from approximate terrain.
 - The generated terrain becomes the base layer for future landscape planning tools.
+
+### Checkpoint 1 Completion Status
+
+Status: Complete for the MVP terrain workflow.
+
+Implemented decisions:
+
+- Primary MVP elevation provider: Open-Meteo Elevation API using Copernicus DEM GLO-90.
+- First-release CRS: EPSG:4326 corner coordinates transformed into local metre-based scene space.
+- First browser processing model: upload preview plus generated project snapshot persisted in local browser storage.
+- First terrain generation model: client/MCP shared terrain generation contract with provider-backed async elevation sampling.
+- First startup mode: clean empty project until an orthophoto and corner coordinates generate the base terrain.
+
+Completion notes:
+
+- Orthophoto upload, four-corner coordinate entry, real-world extent calculation, external DEM sampling, heightmap generation, textured Three.js terrain, 3D view, locked top-view, project metadata persistence, and terrain accuracy/source display are implemented.
+- Generated projects create the `Orthophoto Base` and `Terrain Mesh` layers as the base layer stack for Checkpoint 2.
+- Accuracy is explicitly represented as `survey-grade`, `external-dem`, `conceptual`, or `flat`; the current MVP external provider is labelled approximate and must not be treated as construction-grade survey data.
 
 ## 2. Foundational Map And Environmental Data Layers
 

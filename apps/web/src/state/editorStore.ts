@@ -85,7 +85,7 @@ const baseTerrainRequest: TerrainGenerationRequest = {
 };
 
 const initialTerrainProject = generateTerrainProject(baseTerrainRequest);
-const PROJECT_SNAPSHOT_STORAGE_KEY = "landschaft.project.snapshot.v1";
+const PROJECT_SNAPSHOT_STORAGE_KEY = "landschaft.project.snapshot.v3";
 
 function createProject(corners: OrthophotoCorner[], sourceImageName?: string) {
   return generateTerrainProject({

@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged orthophoto-first and contour-source terrain workflow
+last-change: logged clean canvas snapshot reset
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Reset the browser project snapshot key after the orthophoto-first workflow change so stale terrain canvases no longer reload into the editor.
 - Reworked the terrain workflow so orthophoto upload creates a visible 2D base-map layer, mesh generation hides that flat layer and renders the orthophoto on the 3D mesh, layer visibility controls the scene, and USGS contour lines can be used as the preferred terrain source when available.
 - Replaced low-resolution grid-surface rendering with a denser interpolated terrain surface so external DEM samples no longer read as blocky square height cells.
 - Scaled 3D camera controls to the generated terrain footprint so 1:1 mode can zoom out to the full map, and added display-only vertical relief emphasis for subtle DEM terrain.

@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: smooth USGS contour-derived terrain heightmaps
+ * last-change: carry contour interval metadata for terraced terrain rendering
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -79,6 +79,7 @@ export const TerrainModelSchema = z.object({
   depth: z.number().positive(),
   minElevation: z.number(),
   maxElevation: z.number(),
+  contourInterval: z.number().positive().optional(),
   heightmap: z.array(z.number()),
   generatedAt: z.string()
 });
@@ -91,6 +92,7 @@ export interface TerrainModel {
   depth: number;
   minElevation: number;
   maxElevation: number;
+  contourInterval?: number;
   heightmap: number[];
   generatedAt: string;
 }
@@ -350,6 +352,7 @@ type ContourSample = {
   latitude: number;
   longitude: number;
   elevation: number;
+  interval?: number;
 };
 
 async function generateTerrainModelFromUsgsContours(
@@ -370,7 +373,8 @@ async function generateTerrainModelFromUsgsContours(
   const rawHeightmap = samplePoints.map((point) =>
     interpolateElevationFromContours(point, contourSamples)
   );
-  const heightmap = smoothHeightmap(rawHeightmap, gridSize, 2);
+  const heightmap = smoothHeightmap(rawHeightmap, gridSize, 1);
+  const contourInterval = inferContourInterval(contourSamples);
 
   return {
     accuracyStatus: "external-dem",
@@ -380,6 +384,7 @@ async function generateTerrainModelFromUsgsContours(
     depth: extent.depth,
     minElevation: Math.min(...heightmap),
     maxElevation: Math.max(...heightmap),
+    ...(contourInterval ? { contourInterval } : {}),
     heightmap,
     generatedAt
   };
@@ -415,6 +420,7 @@ async function fetchUsgsContourSamples(corners: OrthophotoCorner[]) {
 
   for (const feature of features) {
     const elevation = feature.attributes?.contourelevation;
+    const interval = feature.attributes?.contourinterval;
     if (typeof elevation !== "number") {
       continue;
     }
@@ -426,7 +432,12 @@ async function fetchUsgsContourSamples(corners: OrthophotoCorner[]) {
           continue;
         }
 
-        samples.push({ latitude, longitude, elevation });
+        samples.push({
+          latitude,
+          longitude,
+          elevation,
+          interval: typeof interval === "number" && interval > 0 ? interval : undefined
+        });
       }
     }
   }
@@ -461,6 +472,23 @@ function interpolateElevationFromContours(
   }
 
   return weightedElevation / totalWeight;
+}
+
+function inferContourInterval(contours: ContourSample[]) {
+  const declaredInterval = contours.find((contour) => contour.interval)?.interval;
+  if (declaredInterval) {
+    return declaredInterval;
+  }
+
+  const elevations = Array.from(
+    new Set(contours.map((contour) => Number(contour.elevation.toFixed(2))))
+  ).sort((a, b) => a - b);
+  const deltas = elevations
+    .slice(1)
+    .map((elevation, index) => Number((elevation - elevations[index]).toFixed(2)))
+    .filter((delta) => delta > 0);
+
+  return deltas[0] ?? undefined;
 }
 
 function smoothHeightmap(heightmap: number[], gridSize: number, passes: number) {

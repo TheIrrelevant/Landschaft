@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: smooth terrain mesh normals with indexed top geometry
+ * last-change: render contour-sourced terrain as terraced layers
  * ---end-metadata---
  */
 import {
@@ -179,7 +179,12 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
   const top = (gx: number, gy: number): Vec3 => {
     const u = gx / last;
     const v = gy / last;
-    return normalizedGridToLocal(u, v, sampleHeightAt(terrain, space, u, v), space);
+    return normalizedGridToLocal(
+      u,
+      v,
+      sampleTerracedHeightAt(terrain, space, u, v),
+      space
+    );
   };
   const bottom = (gx: number, gy: number): Vec3 => {
     const t = gridCoordToLocal(gx, gy, grid, 0, space);
@@ -329,6 +334,16 @@ function sampleHeightAt(
   return (elevation - terrain.minElevation) * space.displayScale * space.verticalScale;
 }
 
+function sampleTerracedHeightAt(
+  terrain: TerrainModel,
+  space: TerrainSpace,
+  u: number,
+  v: number
+) {
+  const elevation = sampleTerracedElevationAt(terrain, u, v);
+  return (elevation - terrain.minElevation) * space.displayScale * space.verticalScale;
+}
+
 function sampleElevationAt(terrain: TerrainModel, u: number, v: number) {
   const sourceGrid = terrain.gridSize;
   const sourceLast = sourceGrid - 1;
@@ -348,6 +363,24 @@ function sampleElevationAt(terrain: TerrainModel, u: number, v: number) {
   const south = lerp(h01, h11, tx);
 
   return lerp(north, south, ty);
+}
+
+function sampleTerracedElevationAt(terrain: TerrainModel, u: number, v: number) {
+  const elevation = sampleElevationAt(terrain, u, v);
+
+  if (!terrain.contourInterval) {
+    return elevation;
+  }
+
+  const baseElevation =
+    Math.floor(terrain.minElevation / terrain.contourInterval) *
+    terrain.contourInterval;
+  const terrace =
+    baseElevation +
+    Math.floor((elevation - baseElevation) / terrain.contourInterval) *
+      terrain.contourInterval;
+
+  return clamp(terrace, terrain.minElevation, terrain.maxElevation);
 }
 
 function heightmapValueAt(terrain: TerrainModel, gx: number, gy: number) {

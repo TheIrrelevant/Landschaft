@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: skip base contour terrace polygons in renderer
+ * last-change: center camera controls on absolute-elevation terrain bounds
  * ---end-metadata---
  */
 import {
@@ -1041,12 +1041,14 @@ function CameraRig({
   far,
   near,
   position,
+  target,
   zoom
 }: {
   mode: "top-view" | "terrain-3d";
   far: number;
   near: number;
   position: [number, number, number];
+  target: [number, number, number];
   zoom?: number;
 }) {
   const camera = useThree((state) => state.camera);
@@ -1062,8 +1064,8 @@ function CameraRig({
       camera.near = near;
       camera.updateProjectionMatrix();
     }
-    camera.lookAt(0, 0, 0);
-  }, [camera, far, mode, near, position, zoom]);
+    camera.lookAt(target[0], target[1], target[2]);
+  }, [camera, far, mode, near, position, target, zoom]);
 
   return null;
 }
@@ -1150,19 +1152,23 @@ export function TerrainScene() {
     [terrain, viewScaleMode]
   );
 
-  const { controls, perspectiveStart, topStart } = useMemo(() => {
+  const { controls, perspectiveStart, target, topStart } = useMemo(() => {
     const span = Math.max(space.sizeX, space.sizeZ, TARGET_SCENE_SPAN);
-    const height = space.rangeMeters * space.displayScale * space.verticalScale;
-    const radius = Math.hypot(span, height + Math.abs(space.baseY));
+    const surfaceTop =
+      terrain.maxElevation * space.displayScale * space.verticalScale;
+    const height = surfaceTop - space.baseY;
+    const targetY = space.baseY + height * 0.55;
+    const radius = Math.hypot(span, height);
     const dist = radius * 1.35;
     const topDist = radius * 2.4;
     return {
-      perspectiveStart: [dist * 0.8, dist * 0.66, dist * 0.8] as [
+      target: [0, targetY, 0] as [number, number, number],
+      perspectiveStart: [dist * 0.8, targetY + dist * 0.66, dist * 0.8] as [
         number,
         number,
         number
       ],
-      topStart: [0, topDist, 0] as [number, number, number],
+      topStart: [0, targetY + topDist, 0] as [number, number, number],
       controls: {
         far: radius * 80,
         near: Math.max(radius / 2000, 0.01),
@@ -1173,7 +1179,7 @@ export function TerrainScene() {
         topZoom: Math.max(0.05, TARGET_SCENE_SPAN / (span * 1.35))
       }
     };
-  }, [space]);
+  }, [space, terrain.maxElevation]);
   const isTopView = activeMode === "top-view";
   const cameraPosition = isTopView ? topStart : perspectiveStart;
 
@@ -1207,6 +1213,7 @@ export function TerrainScene() {
         mode={activeMode}
         near={controls.near}
         position={cameraPosition}
+        target={target}
         zoom={isTopView ? controls.topZoom : undefined}
       />
       <SceneLights />
@@ -1227,7 +1234,7 @@ export function TerrainScene() {
           maxPolarAngle={Math.PI / 2.35}
           minDistance={controls.minDistance}
           minPolarAngle={0.52}
-          target={[0, 0, 0]}
+          target={target}
         />
       )}
     </Canvas>

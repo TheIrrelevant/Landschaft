@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: center camera controls on absolute-elevation terrain bounds
+ * last-change: remount 3D orbit controls on camera target changes
  * ---end-metadata---
  */
 import {
@@ -1182,6 +1182,11 @@ export function TerrainScene() {
   }, [space, terrain.maxElevation]);
   const isTopView = activeMode === "top-view";
   const cameraPosition = isTopView ? topStart : perspectiveStart;
+  const cameraKey = [
+    activeMode,
+    viewScaleMode,
+    target.map((value) => value.toFixed(3)).join(":")
+  ].join("-");
 
   return (
     <Canvas
@@ -1192,6 +1197,7 @@ export function TerrainScene() {
       <color attach="background" args={[new Color(VIEW_BACKGROUND)]} />
       {isTopView ? (
         <OrthographicCamera
+          key={`top-camera-${cameraKey}`}
           far={controls.far}
           makeDefault
           near={controls.near}
@@ -1201,6 +1207,7 @@ export function TerrainScene() {
         />
       ) : (
         <PerspectiveCamera
+          key={`perspective-camera-${cameraKey}`}
           far={controls.far}
           fov={27}
           makeDefault
@@ -1226,9 +1233,10 @@ export function TerrainScene() {
         />
       ) : (
         <OrbitControls
+          key={`orbit-${cameraKey}`}
           dampingFactor={0.06}
           enableDamping
-          enablePan={false}
+          enablePan
           makeDefault
           maxDistance={controls.maxDistance}
           maxPolarAngle={Math.PI / 2.35}

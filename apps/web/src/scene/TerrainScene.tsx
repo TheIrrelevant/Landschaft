@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: render orthophoto base map layer and respect layer visibility
+ * last-change: keep orthophoto texture separate from generated terrain mesh
  * ---end-metadata---
  */
 import {
@@ -544,19 +544,17 @@ function useOrthophotoTexture(url: string | null) {
 }
 
 function TerrainMesh({
-  orthophotoTexture,
   terrain,
   space
 }: {
-  orthophotoTexture: Texture | null;
   terrain: TerrainModel;
   space: TerrainSpace;
 }) {
   const geometry = useMemo(() => buildTerrainGeometry(terrain, space), [terrain, space]);
   const materials = useMemo(() => {
     const topSurface = new THREE.MeshLambertNodeMaterial({
-      color: orthophotoTexture ? new Color("#ffffff") : new Color(TERRAIN_CLAY),
-      map: orthophotoTexture ?? createFeltTexture(),
+      color: new Color(TERRAIN_CLAY),
+      map: createFeltTexture(),
       side: DoubleSide
     });
     const solid = new THREE.MeshLambertNodeMaterial({
@@ -565,7 +563,7 @@ function TerrainMesh({
       side: DoubleSide
     });
     return [topSurface, solid];
-  }, [orthophotoTexture]);
+  }, []);
 
   return (
     <mesh castShadow geometry={geometry} material={materials} receiveShadow />
@@ -691,9 +689,7 @@ function GroundPlane({ baseY }: { baseY: number }) {
 function TerrainContent() {
   const terrain = useEditorStore((state) => state.terrain);
   const layers = useEditorStore((state) => state.layers);
-  const orthophotoPreviewUrl = useEditorStore((state) => state.orthophotoPreviewUrl);
   const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
-  const orthophotoTexture = useOrthophotoTexture(orthophotoPreviewUrl);
   const terrainLayer = getLayer(layers, "terrain-mesh");
   const space = useMemo(
     () =>
@@ -712,11 +708,7 @@ function TerrainContent() {
       <GroundPlane baseY={space.baseY} />
       {terrainLayer?.visible ?? true ? (
         <>
-          <TerrainMesh
-            orthophotoTexture={orthophotoTexture}
-            terrain={terrain}
-            space={space}
-          />
+          <TerrainMesh terrain={terrain} space={space} />
           <ContourLines terrain={terrain} space={space} />
         </>
       ) : null}

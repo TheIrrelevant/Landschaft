@@ -3,15 +3,16 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged clean canvas snapshot reset
+last-change: logged neutral terrain mesh material
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Stopped draping orthophoto imagery onto generated terrain meshes; orthophotos now stay as separate 2D reference layers while the 3D terrain renders with a neutral topo material.
 - Reset the browser project snapshot key after the orthophoto-first workflow change so stale terrain canvases no longer reload into the editor.
-- Reworked the terrain workflow so orthophoto upload creates a visible 2D base-map layer, mesh generation hides that flat layer and renders the orthophoto on the 3D mesh, layer visibility controls the scene, and USGS contour lines can be used as the preferred terrain source when available.
+- Reworked the terrain workflow so orthophoto upload creates a visible 2D base-map layer, mesh generation hides that flat layer and renders a separate neutral 3D mesh, layer visibility controls the scene, and USGS contour lines can be used as the preferred terrain source when available.
 - Replaced low-resolution grid-surface rendering with a denser interpolated terrain surface so external DEM samples no longer read as blocky square height cells.
 - Scaled 3D camera controls to the generated terrain footprint so 1:1 mode can zoom out to the full map, and added display-only vertical relief emphasis for subtle DEM terrain.
 - Reduced default Open-Meteo terrain generation to fast-preview sampling and added retry/throttle handling for temporary elevation API rate limits.
@@ -19,7 +20,7 @@ last-change: logged clean canvas snapshot reset
 - Completed Checkpoint 1 MVP: orthophoto upload, corner-coordinate terrain generation, external DEM sampling, textured terrain rendering, 2D/3D views, persisted project metadata, and explicit accuracy/source display.
 - Integrated the Open-Meteo Elevation API as the first real external DEM source for terrain generation.
 - Added validated project snapshot persistence for generated terrain metadata, terrain models, and layer state.
-- Applied uploaded orthophoto previews as the terrain top-surface texture after terrain generation, with neutral felt fallback when no image is available.
+- Applied uploaded orthophoto previews to the flat reference base-map layer, with neutral felt fallback when no image is available.
 - Connected the web terrain generation flow to the shared terrain generation contract so generated terrain now creates the base orthophoto and terrain layer stack.
 - Added shared terrain generation contracts plus a deterministic sample external DEM provider for Checkpoint 1 backend work.
 - Added an MCP `terrain_generate` tool that returns project metadata, a generated terrain model, and base orthophoto/terrain layers from corner coordinates.

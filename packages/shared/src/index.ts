@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: carry contour interval metadata for terraced terrain rendering
+ * last-change: interpolate USGS contour terrain from contour line segments
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -348,9 +348,9 @@ type UsgsContourFeature = {
   };
 };
 
-type ContourSample = {
-  latitude: number;
-  longitude: number;
+type ContourSegment = {
+  start: TerrainSamplePoint;
+  end: TerrainSamplePoint;
   elevation: number;
   interval?: number;
 };
@@ -360,21 +360,21 @@ async function generateTerrainModelFromUsgsContours(
   generatedAt = new Date().toISOString()
 ): Promise<TerrainModel> {
   const extent = getExtentMeters(request.corners);
-  const gridSize = getGridSizeForQuality(request.quality);
+  const gridSize = getContourGridSizeForQuality(request.quality);
   const samplePoints = createGridSamplePoints(request.corners, gridSize);
-  const contourSamples = await fetchUsgsContourSamples(request.corners);
+  const contourSegments = await fetchUsgsContourSegments(request.corners);
 
-  if (contourSamples.length === 0) {
+  if (contourSegments.length === 0) {
     throw new Error(
       "No USGS contour lines with elevation attributes were found for this extent."
     );
   }
 
   const rawHeightmap = samplePoints.map((point) =>
-    interpolateElevationFromContours(point, contourSamples)
+    interpolateElevationFromContours(point, contourSegments)
   );
   const heightmap = smoothHeightmap(rawHeightmap, gridSize, 1);
-  const contourInterval = inferContourInterval(contourSamples);
+  const contourInterval = inferContourInterval(contourSegments);
 
   return {
     accuracyStatus: "external-dem",
@@ -390,7 +390,7 @@ async function generateTerrainModelFromUsgsContours(
   };
 }
 
-async function fetchUsgsContourSamples(corners: OrthophotoCorner[]) {
+async function fetchUsgsContourSegments(corners: OrthophotoCorner[]) {
   const bbox = getBoundingBox(corners);
   const url = new URL(
     "https://carto.nationalmap.gov/arcgis/rest/services/contours/MapServer/26/query"
@@ -416,7 +416,7 @@ async function fetchUsgsContourSamples(corners: OrthophotoCorner[]) {
 
   const payload = (await response.json()) as { features?: UsgsContourFeature[] };
   const features = payload.features ?? [];
-  const samples: ContourSample[] = [];
+  const segments: ContourSegment[] = [];
 
   for (const feature of features) {
     const elevation = feature.attributes?.contourelevation;
@@ -426,15 +426,21 @@ async function fetchUsgsContourSamples(corners: OrthophotoCorner[]) {
     }
 
     for (const path of feature.geometry?.paths ?? []) {
-      for (const coordinate of path) {
-        const [longitude, latitude] = coordinate;
-        if (typeof latitude !== "number" || typeof longitude !== "number") {
+      for (let index = 0; index < path.length - 1; index += 1) {
+        const [startLongitude, startLatitude] = path[index] ?? [];
+        const [endLongitude, endLatitude] = path[index + 1] ?? [];
+        if (
+          typeof startLatitude !== "number" ||
+          typeof startLongitude !== "number" ||
+          typeof endLatitude !== "number" ||
+          typeof endLongitude !== "number"
+        ) {
           continue;
         }
 
-        samples.push({
-          latitude,
-          longitude,
+        segments.push({
+          start: { latitude: startLatitude, longitude: startLongitude },
+          end: { latitude: endLatitude, longitude: endLongitude },
           elevation,
           interval: typeof interval === "number" && interval > 0 ? interval : undefined
         });
@@ -442,20 +448,20 @@ async function fetchUsgsContourSamples(corners: OrthophotoCorner[]) {
     }
   }
 
-  return samples;
+  return segments;
 }
 
 function interpolateElevationFromContours(
   point: TerrainSamplePoint,
-  contours: ContourSample[]
+  contours: ContourSegment[]
 ) {
   const nearest = contours
     .map((contour) => ({
       elevation: contour.elevation,
-      distance: getCoordinateDistanceMeters(point, contour)
+      distance: getPointToSegmentDistanceMeters(point, contour.start, contour.end)
     }))
     .sort((a, b) => a.distance - b.distance)
-    .slice(0, 24);
+    .slice(0, 32);
 
   const exact = nearest.find((sample) => sample.distance < 0.5);
   if (exact) {
@@ -474,7 +480,7 @@ function interpolateElevationFromContours(
   return weightedElevation / totalWeight;
 }
 
-function inferContourInterval(contours: ContourSample[]) {
+function inferContourInterval(contours: ContourSegment[]) {
   const declaredInterval = contours.find((contour) => contour.interval)?.interval;
   if (declaredInterval) {
     return declaredInterval;
@@ -489,6 +495,40 @@ function inferContourInterval(contours: ContourSample[]) {
     .filter((delta) => delta > 0);
 
   return deltas[0] ?? undefined;
+}
+
+function getPointToSegmentDistanceMeters(
+  point: TerrainSamplePoint,
+  start: TerrainSamplePoint,
+  end: TerrainSamplePoint
+) {
+  const averageLatitude =
+    ((point.latitude + start.latitude + end.latitude) / 3) * (Math.PI / 180);
+  const metersPerDegreeLatitude = 111_320;
+  const metersPerDegreeLongitude =
+    metersPerDegreeLatitude * Math.cos(averageLatitude);
+  const px = point.longitude * metersPerDegreeLongitude;
+  const py = point.latitude * metersPerDegreeLatitude;
+  const ax = start.longitude * metersPerDegreeLongitude;
+  const ay = start.latitude * metersPerDegreeLatitude;
+  const bx = end.longitude * metersPerDegreeLongitude;
+  const by = end.latitude * metersPerDegreeLatitude;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared === 0) {
+    return Math.hypot(px - ax, py - ay);
+  }
+
+  const t = Math.min(
+    1,
+    Math.max(0, ((px - ax) * dx + (py - ay) * dy) / lengthSquared)
+  );
+  const closestX = ax + dx * t;
+  const closestY = ay + dy * t;
+
+  return Math.hypot(px - closestX, py - closestY);
 }
 
 function smoothHeightmap(heightmap: number[], gridSize: number, passes: number) {
@@ -735,6 +775,18 @@ function getGridSizeForQuality(quality: TerrainGenerationQuality) {
   }
 
   return 33;
+}
+
+function getContourGridSizeForQuality(quality: TerrainGenerationQuality) {
+  if (quality === "fast-preview") {
+    return 65;
+  }
+
+  if (quality === "detailed") {
+    return 129;
+  }
+
+  return 97;
 }
 
 export interface MapReadRequest {

@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged terraced contour terrain rendering
+last-change: logged contour segment terrain interpolation
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Interpolate USGS contour terrain from full contour line segments and increase contour-source grid density so terraced breaks follow izohypse paths more closely.
 - Added contour interval metadata from USGS contour features and render contour-sourced terrain as terraced layer-cake topography instead of a smooth DEM surface.
 - Rebuilt terrain top geometry as an indexed shared-vertex surface, increased contour-source generation quality, and smoothed USGS contour-derived heightmaps so izohypse terrain no longer shades as disconnected grid patches.
 - Stopped draping orthophoto imagery onto generated terrain meshes; orthophotos now stay as separate 2D reference layers while the 3D terrain renders with a neutral topo material.

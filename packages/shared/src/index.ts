@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: optimize contour terrain generation performance
+ * last-change: keep lowest contour as first terrace layer
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -439,11 +439,7 @@ async function generateTerrainModelFromUsgsContours(
   const contourInterval = inferContourInterval(contourSegments);
   const minElevation = Math.min(...heightmap);
   const maxElevation = Math.max(...heightmap);
-  const contourTerraces = createContourTerraces(
-    request.corners,
-    contourRings,
-    minElevation
-  );
+  const contourTerraces = createContourTerraces(request.corners, contourRings);
 
   return {
     accuracyStatus: "external-dem",
@@ -633,15 +629,13 @@ function applyClosedContourRings(
 
 function createContourTerraces(
   corners: OrthophotoCorner[],
-  rings: ContourRing[],
-  baseElevation: number
+  rings: ContourRing[]
 ) {
   const bbox = getBoundingBox(corners);
   const longitudeSpan = Math.max(bbox.maxLongitude - bbox.minLongitude, 0.000001);
   const latitudeSpan = Math.max(bbox.maxLatitude - bbox.minLatitude, 0.000001);
 
   return rings
-    .filter((ring) => ring.elevation > baseElevation)
     .map((ring) => ({
       elevation: ring.elevation,
       points: ring.points

@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: remount 3D orbit controls on camera target changes
+ * last-change: build contour terraces from zero datum
  * ---end-metadata---
  */
 import {
@@ -295,8 +295,7 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
 
 function buildContourTerraceGeometry(terrain: TerrainModel, space: TerrainSpace) {
   const terraces = [...(terrain.contourTerraces ?? [])]
-    .sort((a, b) => a.elevation - b.elevation)
-    .filter((terrace) => terrace.elevation > terrain.minElevation);
+    .sort((a, b) => a.elevation - b.elevation);
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
@@ -315,7 +314,7 @@ function buildContourTerraceGeometry(terrain: TerrainModel, space: TerrainSpace)
 
     const topY = elevationToSceneHeight(terrace.elevation, space);
     const bottomY = elevationToSceneHeight(
-      getContainingLowerTerraceElevation(terrace, terraces, terrain.minElevation),
+      getContainingLowerTerraceElevation(terrace, terraces, 0),
       space
     );
     const topStart = positions.length / 3;
@@ -830,7 +829,10 @@ function BaseTerrainBlock({
   terrain: TerrainModel;
   space: TerrainSpace;
 }) {
-  const baseTopY = elevationToSceneHeight(terrain.minElevation, space);
+  const baseTopY = elevationToSceneHeight(
+    terrain.contourTerraces?.length ? 0 : terrain.minElevation,
+    space
+  );
   const height = Math.max(baseTopY - space.baseY, 0.1);
   const material = useMemo(
     () =>

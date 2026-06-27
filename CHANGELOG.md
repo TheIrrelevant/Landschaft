@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged orbit control remount fix
+last-change: logged zero-datum contour terrace stacking
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Changed contour terrace stacking to use zero datum as the physical base and keep the lowest contour as the first raised layer.
 - Remount 3D cameras and orbit controls when view scale or terrain camera target changes, and re-enabled 3D panning so camera controls do not lock after terrain regeneration.
 - Optimized USGS contour terrain generation by replacing per-sample full segment sorting with bounded nearest-segment selection and reducing contour fallback grid density now that polygon terraces drive the mesh.
 - Centered 3D camera framing and orbit controls on absolute-elevation terrain bounds so zoom/orbit remains usable after contour terrace extrusion.

@@ -4,7 +4,7 @@
  * description: Upload-first orthophoto setup with sequential corner coordinate prompts.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: display generated terrain accuracy from shared terrain state
+ * last-change: display external elevation generation progress and errors
  * ---end-metadata---
  */
 import { ChevronDown, ChevronUp, CloudUpload, Image } from "lucide-react";
@@ -19,7 +19,9 @@ export function TerrainSetupPanel() {
     project,
     setCornerCoordinate,
     setOrthophotoPreview,
-    terrain
+    terrain,
+    terrainGenerating,
+    terrainGenerationError
   } = useEditorStore();
   const [sectionOpen, setSectionOpen] = useState(true);
   const activeCorner =
@@ -119,7 +121,7 @@ export function TerrainSetupPanel() {
             </div>
             <button
               className="secondary-action"
-              disabled={!activeCorner}
+              disabled={!activeCorner || terrainGenerating}
               onClick={
                 activeCorner
                   ? isLastStep
@@ -129,10 +131,18 @@ export function TerrainSetupPanel() {
               }
               type="button"
             >
-              {activeCorner && isLastStep ? "Generate terrain" : "Next"}
+              {terrainGenerating
+                ? "Generating"
+                : activeCorner && isLastStep
+                  ? "Generate terrain"
+                  : "Next"}
               <span aria-hidden="true">→</span>
             </button>
           </div>
+
+          {terrainGenerationError ? (
+            <p className="upload-note">{terrainGenerationError}</p>
+          ) : null}
 
           {coordinatesComplete ? (
             <div className="terrain-summary">

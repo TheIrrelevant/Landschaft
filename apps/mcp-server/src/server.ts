@@ -3,10 +3,10 @@
  * description: MCP server exposing Landschaft planning editor terrain and map tools.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: added checkpoint 1 terrain generation tool
+ * last-change: route terrain generation through async elevation providers
  */
 import {
-  generateTerrainProject,
+  generateTerrainProjectAsync,
   TerrainGenerationRequestSchema
 } from "@landschaft/shared";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -26,7 +26,7 @@ server.tool(
     content: [
       {
         type: "text",
-        text: JSON.stringify(generateTerrainProject(request), null, 2)
+        text: JSON.stringify(await generateTerrainProjectAsync(request), null, 2)
       }
     ]
   })

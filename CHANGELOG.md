@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-27
 last-model: codex-gpt-5
-last-change: logged browser project snapshot persistence
+last-change: logged Open-Meteo elevation provider integration
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Integrated the Open-Meteo Elevation API as the first real external DEM source for terrain generation.
 - Added validated project snapshot persistence for generated terrain metadata, terrain models, and layer state.
 - Applied uploaded orthophoto previews as the terrain top-surface texture after terrain generation, with neutral felt fallback when no image is available.
 - Connected the web terrain generation flow to the shared terrain generation contract so generated terrain now creates the base orthophoto and terrain layer stack.

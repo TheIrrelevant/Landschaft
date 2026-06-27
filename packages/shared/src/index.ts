@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: added project snapshot persistence contract
+ * last-change: added Open-Meteo elevation provider adapter
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -106,6 +106,7 @@ export type TerrainGenerationQuality = z.infer<
 >;
 
 export const TerrainHeightSourceSchema = z.enum([
+  "open-meteo",
   "sample-external-dem",
   "flat"
 ]);
@@ -134,6 +135,18 @@ export interface TerrainGenerationResult {
   project: ProjectMetadata;
   terrain: TerrainModel;
   baseLayers: PlanningLayer[];
+}
+
+export interface TerrainSamplePoint {
+  latitude: number;
+  longitude: number;
+}
+
+export interface ElevationProvider {
+  id: TerrainHeightSource;
+  label: string;
+  accuracyStatus: TerrainAccuracyStatus;
+  sample(points: TerrainSamplePoint[]): Promise<number[]>;
 }
 
 export type PlanningLayerKind =
@@ -222,26 +235,17 @@ export function generateTerrainModel(
 ): TerrainModel {
   const extent = getExtentMeters(request.corners);
   const gridSize = getGridSizeForQuality(request.quality);
-  const heightmap = Array.from({ length: gridSize * gridSize }, (_, index) => {
-    if (request.heightSource === "flat") {
-      return 0;
-    }
-
-    const x = index % gridSize;
-    const y = Math.floor(index / gridSize);
-    const nx = x / (gridSize - 1);
-    const ny = y / (gridSize - 1);
-    const ridge = Math.sin(nx * Math.PI * 2.4) * 5.8;
-    const drainage = Math.cos((nx + ny) * Math.PI * 1.8) * 3.6;
-    const slope = (1 - ny) * 11.5;
-
-    return Number((ridge + drainage + slope + 42).toFixed(2));
-  });
+  const heightmap =
+    request.heightSource === "flat"
+      ? createFlatHeightmap(gridSize)
+      : createSampleExternalDemHeightmap(gridSize);
 
   return {
     accuracyStatus: request.heightSource === "flat" ? "flat" : "external-dem",
     elevationProvider:
-      request.heightSource === "flat" ? "Flat project surface" : "Sample external DEM provider",
+      request.heightSource === "flat"
+        ? "Flat project surface"
+        : "Sample external DEM provider",
     gridSize,
     width: extent.width,
     depth: extent.depth,
@@ -263,24 +267,60 @@ export function generateTerrainProject(
   return {
     project,
     terrain,
-    baseLayers: [
-      {
-        id: "orthophoto-base",
-        name: "Orthophoto Base",
-        kind: "orthophoto",
-        visible: true,
-        opacity: 1,
-        reviewStatus: "draft"
-      },
-      {
-        id: "terrain-mesh",
-        name: "Terrain Mesh",
-        kind: "terrain",
-        visible: true,
-        opacity: 1,
-        reviewStatus: "draft"
-      }
-    ]
+    baseLayers: createBaseLayers()
+  };
+}
+
+export async function generateTerrainProjectAsync(
+  input: TerrainGenerationRequest,
+  generatedAt?: string
+): Promise<TerrainGenerationResult> {
+  const request = TerrainGenerationRequestSchema.parse(input);
+
+  if (request.heightSource !== "open-meteo") {
+    return generateTerrainProject(request, generatedAt);
+  }
+
+  const project = createProjectMetadata(request);
+  const terrain = await generateTerrainModelFromProvider(
+    request,
+    openMeteoElevationProvider,
+    generatedAt
+  );
+
+  return {
+    project,
+    terrain,
+    baseLayers: createBaseLayers()
+  };
+}
+
+export async function generateTerrainModelFromProvider(
+  request: NormalizedTerrainGenerationRequest,
+  provider: ElevationProvider,
+  generatedAt = new Date().toISOString()
+): Promise<TerrainModel> {
+  const extent = getExtentMeters(request.corners);
+  const gridSize = getGridSizeForQuality(request.quality);
+  const samplePoints = createGridSamplePoints(request.corners, gridSize);
+  const heightmap = await provider.sample(samplePoints);
+
+  if (heightmap.length !== samplePoints.length) {
+    throw new Error(
+      `Elevation provider returned ${heightmap.length} values for ${samplePoints.length} sample points.`
+    );
+  }
+
+  return {
+    accuracyStatus: provider.accuracyStatus,
+    elevationProvider: provider.label,
+    gridSize,
+    width: extent.width,
+    depth: extent.depth,
+    minElevation: Math.min(...heightmap),
+    maxElevation: Math.max(...heightmap),
+    heightmap,
+    generatedAt
   };
 }
 
@@ -293,6 +333,132 @@ export function getExtentMeters(corners: OrthophotoCorner[]) {
     width: Math.max(1, Math.round(getDistanceMeters(north, east))),
     depth: Math.max(1, Math.round(getDistanceMeters(north, south)))
   };
+}
+
+export const openMeteoElevationProvider: ElevationProvider = {
+  id: "open-meteo",
+  label: "Open-Meteo Elevation API (Copernicus DEM GLO-90)",
+  accuracyStatus: "external-dem",
+  async sample(points) {
+    const batches = chunkArray(points, 100);
+    const elevations: number[] = [];
+
+    for (const batch of batches) {
+      const url = new URL("https://api.open-meteo.com/v1/elevation");
+      url.searchParams.set(
+        "latitude",
+        batch.map((point) => point.latitude.toFixed(6)).join(",")
+      );
+      url.searchParams.set(
+        "longitude",
+        batch.map((point) => point.longitude.toFixed(6)).join(",")
+      );
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Open-Meteo elevation request failed: ${response.status}`);
+      }
+
+      const payload = (await response.json()) as { elevation?: unknown };
+      if (!Array.isArray(payload.elevation)) {
+        throw new Error("Open-Meteo elevation response did not include elevations.");
+      }
+
+      elevations.push(
+        ...payload.elevation.map((value) => {
+          if (typeof value !== "number") {
+            throw new Error("Open-Meteo elevation response included a non-number.");
+          }
+
+          return value;
+        })
+      );
+    }
+
+    return elevations;
+  }
+};
+
+function createBaseLayers(): PlanningLayer[] {
+  return [
+    {
+      id: "orthophoto-base",
+      name: "Orthophoto Base",
+      kind: "orthophoto",
+      visible: true,
+      opacity: 1,
+      reviewStatus: "draft"
+    },
+    {
+      id: "terrain-mesh",
+      name: "Terrain Mesh",
+      kind: "terrain",
+      visible: true,
+      opacity: 1,
+      reviewStatus: "draft"
+    }
+  ];
+}
+
+function createFlatHeightmap(gridSize: number) {
+  return Array.from({ length: gridSize * gridSize }, () => 0);
+}
+
+function createSampleExternalDemHeightmap(gridSize: number) {
+  return Array.from({ length: gridSize * gridSize }, (_, index) => {
+    const x = index % gridSize;
+    const y = Math.floor(index / gridSize);
+    const nx = x / (gridSize - 1);
+    const ny = y / (gridSize - 1);
+    const ridge = Math.sin(nx * Math.PI * 2.4) * 5.8;
+    const drainage = Math.cos((nx + ny) * Math.PI * 1.8) * 3.6;
+    const slope = (1 - ny) * 11.5;
+
+    return Number((ridge + drainage + slope + 42).toFixed(2));
+  });
+}
+
+function createGridSamplePoints(
+  corners: OrthophotoCorner[],
+  gridSize: number
+): TerrainSamplePoint[] {
+  const nw = getCorner(corners, "NW");
+  const ne = getCorner(corners, "NE");
+  const se = getCorner(corners, "SE");
+  const sw = getCorner(corners, "SW");
+  const points: TerrainSamplePoint[] = [];
+
+  for (let gy = 0; gy < gridSize; gy += 1) {
+    const v = gy / (gridSize - 1);
+    for (let gx = 0; gx < gridSize; gx += 1) {
+      const u = gx / (gridSize - 1);
+      const northLatitude = lerp(nw.latitude, ne.latitude, u);
+      const northLongitude = lerp(nw.longitude, ne.longitude, u);
+      const southLatitude = lerp(sw.latitude, se.latitude, u);
+      const southLongitude = lerp(sw.longitude, se.longitude, u);
+
+      points.push({
+        latitude: lerp(northLatitude, southLatitude, v),
+        longitude: lerp(northLongitude, southLongitude, v)
+      });
+    }
+  }
+
+  return points;
+}
+
+function lerp(start: number, end: number, amount: number) {
+  return start + (end - start) * amount;
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+
+  return chunks;
 }
 
 function getCorner(corners: OrthophotoCorner[], label: OrthophotoCorner["label"]) {

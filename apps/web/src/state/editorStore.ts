@@ -4,11 +4,12 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: persist generated project snapshots in browser storage
+ * last-change: generate terrain asynchronously with Open-Meteo elevation data
  * ---end-metadata---
  */
 import {
   generateTerrainProject,
+  generateTerrainProjectAsync,
   ProjectSnapshotSchema,
   type CodedArea,
   type OrthophotoCorner,
@@ -36,6 +37,8 @@ interface EditorState {
   project: ProjectMetadata;
   terrain: TerrainModel;
   terrainGenerated: boolean;
+  terrainGenerating: boolean;
+  terrainGenerationError: string | null;
   orthophotoPreviewUrl: string | null;
   selectedArea: CodedArea | null;
   selectedLayerId: string | null;
@@ -47,7 +50,7 @@ interface EditorState {
   setViewScaleMode: (mode: EditorState["viewScaleMode"]) => void;
   advanceCoordinateStep: () => void;
   closeInspector: () => void;
-  generateTerrain: () => void;
+  generateTerrain: () => Promise<void>;
   reorderLayer: (sourceLayerId: string, targetLayerId: string) => void;
   setCornerCoordinate: (
     label: OrthophotoCorner["label"],
@@ -97,7 +100,7 @@ function createTerrainRequest(project: ProjectMetadata): TerrainGenerationReques
     sourceImageName: project.sourceImageName,
     corners: project.corners,
     quality: "balanced",
-    heightSource: "sample-external-dem"
+    heightSource: "open-meteo"
   };
 }
 
@@ -152,11 +155,13 @@ function toProjectSnapshot(state: EditorPersistedState): ProjectSnapshot {
 
 const storedProjectSnapshot = loadProjectSnapshot();
 
-export const useEditorStore = create<EditorState>((set) => ({
+export const useEditorStore = create<EditorState>((set, get) => ({
   layers: storedProjectSnapshot?.layers ?? [],
   project: storedProjectSnapshot?.project ?? initialTerrainProject.project,
   terrain: storedProjectSnapshot?.terrain ?? initialTerrainProject.terrain,
   terrainGenerated: storedProjectSnapshot?.terrainGenerated ?? false,
+  terrainGenerating: false,
+  terrainGenerationError: null,
   orthophotoPreviewUrl: null,
   coordinateStep: storedProjectSnapshot?.coordinateStep ?? null,
   inspectorOpen: false,
@@ -170,9 +175,14 @@ export const useEditorStore = create<EditorState>((set) => ({
         state.coordinateStep === null ? 0 : Math.min(state.coordinateStep + 1, 4)
     })),
   closeInspector: () => set({ inspectorOpen: false }),
-  generateTerrain: () =>
-    set((state) => {
-      const result = generateTerrainProject(createTerrainRequest(state.project));
+  generateTerrain: async () => {
+    const state = get();
+    set({ terrainGenerating: true, terrainGenerationError: null });
+
+    try {
+      const result = await generateTerrainProjectAsync(
+        createTerrainRequest(state.project)
+      );
       const nextState = {
         project: result.project,
         terrain: result.terrain,
@@ -181,12 +191,23 @@ export const useEditorStore = create<EditorState>((set) => ({
         selectedArea: null,
         terrainGenerated: true,
         inspectorOpen: false,
-        coordinateStep: 4
+        coordinateStep: 4,
+        terrainGenerating: false,
+        terrainGenerationError: null
       };
       saveProjectSnapshot(toProjectSnapshot(nextState));
 
-      return nextState;
-    }),
+      set(nextState);
+    } catch (error) {
+      set({
+        terrainGenerating: false,
+        terrainGenerationError:
+          error instanceof Error
+            ? error.message
+            : "Terrain generation failed."
+      });
+    }
+  },
   reorderLayer: (sourceLayerId, targetLayerId) =>
     set((state) => {
       const sourceIndex = state.layers.findIndex(
@@ -243,6 +264,7 @@ export const useEditorStore = create<EditorState>((set) => ({
         selectedLayerId: null,
         selectedArea: null,
         terrainGenerated: false,
+        terrainGenerationError: null,
         inspectorOpen: false
       };
     }),

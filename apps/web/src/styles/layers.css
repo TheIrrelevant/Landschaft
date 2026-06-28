@@ -2,18 +2,18 @@
  * ---metadata---
  * type: app-style
  * description: Photoshop-style layer panel for the Landschaft editor.
- * last-updated: 2026-06-25
- * last-model: cursor-composer
- * last-change: design system tokens with desaturated accent for selected layer
+ * last-updated: 2026-06-28
+ * last-model: codex-gpt-5
+ * last-change: show uploaded orthophoto previews in layer thumbnails
  * ---end-metadata---
  */
 .layers-panel {
   border-bottom: 1px solid var(--color-border);
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   padding: 18px 0 0;
 }
 
@@ -23,7 +23,7 @@
 
 .layers-panel-body {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 10px;
   margin-top: 14px;
@@ -88,9 +88,9 @@
 }
 
 .layer-list {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   padding: 2px 12px 8px;
 }
 
@@ -159,6 +159,8 @@
 
 .layer-thumbnail.kind-orthophoto {
   background: linear-gradient(180deg, var(--color-bg-muted), #c8c8c4);
+  background-position: center;
+  background-size: cover;
 }
 
 .layer-thumbnail.kind-terrain {

@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Zustand store for Landschaft editor layers and selected area state.
- * last-updated: 2026-06-27
+ * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: use detailed terrain sampling for contour mesh generation
+ * last-change: insert generated mesh layer above existing layers
  * ---end-metadata---
  */
 import {
@@ -28,6 +28,7 @@ type EditorPersistedState = Pick<
   | "coordinateStep"
   | "layers"
   | "project"
+  | "orthophotoPreviewUrl"
   | "selectedLayerId"
   | "terrain"
   | "terrainGenerated"
@@ -166,7 +167,8 @@ function toProjectSnapshot(state: EditorPersistedState): ProjectSnapshot {
     layers: state.layers,
     terrainGenerated: state.terrainGenerated,
     selectedLayerId: state.selectedLayerId,
-    coordinateStep: state.coordinateStep
+    coordinateStep: state.coordinateStep,
+    orthophotoPreviewUrl: state.orthophotoPreviewUrl
   };
 }
 
@@ -180,7 +182,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   terrainGenerating: false,
   terrainGenerationError: null,
   terrainHeightSource: "usgs-contours",
-  orthophotoPreviewUrl: null,
+  orthophotoPreviewUrl: storedProjectSnapshot?.orthophotoPreviewUrl ?? null,
   coordinateStep: storedProjectSnapshot?.coordinateStep ?? null,
   inspectorOpen: false,
   viewScaleMode: "fit",
@@ -201,15 +203,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const result = await generateTerrainProjectAsync(
         createTerrainRequest(state.project, state.terrainHeightSource)
       );
-      const layers = result.baseLayers.map((layer) =>
-        layer.id === "orthophoto-base"
-          ? { ...layer, visible: false }
-          : { ...layer, visible: true }
-      );
+      const layers = result.baseLayers
+        .map((layer) => ({ ...layer, visible: true }))
+        .sort((layerA, layerB) => {
+          if (layerA.id === "terrain-mesh") {
+            return -1;
+          }
+
+          if (layerB.id === "terrain-mesh") {
+            return 1;
+          }
+
+          return 0;
+        });
       const nextState = {
         project: result.project,
         terrain: result.terrain,
         layers,
+        orthophotoPreviewUrl: state.orthophotoPreviewUrl,
         selectedLayerId: "terrain-mesh",
         selectedArea: null,
         terrainGenerated: true,
@@ -279,9 +290,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       clearProjectSnapshot();
 
       const layers = [createOrthophotoLayer()];
-
-      return {
-        activeMode: "top-view",
+      const nextState = {
+        activeMode: "top-view" as const,
         coordinateStep: 0,
         orthophotoPreviewUrl: previewUrl,
         project: {
@@ -295,6 +305,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         terrainGenerationError: null,
         inspectorOpen: false
       };
+      saveProjectSnapshot(toProjectSnapshot({ ...state, ...nextState }));
+
+      return nextState;
     }),
   setLayerOpacity: (layerId, opacity) =>
     set((state) => {

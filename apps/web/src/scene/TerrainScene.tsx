@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: render contour terrain as a continuous heightfield mesh
+ * last-change: render scene layers from the Photoshop-style layer order
  * ---end-metadata---
  */
 import {
@@ -592,13 +592,17 @@ function TerrainMesh({
 }
 
 function OrthophotoBaseMap({
+  forceOverlay,
   opacity,
   project,
+  renderOrder,
   texture,
   viewScaleMode
 }: {
+  forceOverlay: boolean;
   opacity: number;
   project: ProjectMetadata;
+  renderOrder: number;
   texture: Texture | null;
   viewScaleMode: "fit" | "1:1";
 }) {
@@ -609,23 +613,31 @@ function OrthophotoBaseMap({
   const materials = useMemo(() => {
     const side = new THREE.MeshBasicNodeMaterial({
       color: new Color("#bdbdbd"),
+      depthTest: !forceOverlay,
+      depthWrite: !forceOverlay,
       transparent: true,
       opacity
     });
     const top = new THREE.MeshBasicNodeMaterial({
       color: new Color("#ffffff"),
+      depthTest: !forceOverlay,
+      depthWrite: !forceOverlay,
       map: texture ?? createFeltTexture(),
       transparent: true,
       opacity
     });
 
     return [side, side, top, side, side, side];
-  }, [opacity, texture]);
+  }, [forceOverlay, opacity, texture]);
 
   return (
     <group>
-      <GroundPlane baseY={-0.12} />
-      <mesh material={materials} position={[0, 0, 0]} receiveShadow>
+      <mesh
+        material={materials}
+        position={[0, 0, 0]}
+        receiveShadow
+        renderOrder={renderOrder}
+      >
         <boxGeometry args={[space.sizeX, 0.08, space.sizeZ]} />
       </mesh>
     </group>
@@ -707,37 +719,28 @@ function GroundPlane({ baseY }: { baseY: number }) {
   );
 }
 
-function TerrainContent() {
-  const terrain = useEditorStore((state) => state.terrain);
-  const layers = useEditorStore((state) => state.layers);
-  const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
-  const terrainLayer = getLayer(layers, "terrain-mesh");
-  const space = useMemo(
-    () =>
-      getTerrainSpace(
-        terrain,
-        viewScaleMode === "1:1" ? 1 : undefined,
-        viewScaleMode === "1:1"
-          ? ONE_TO_ONE_VERTICAL_EXAGGERATION
-          : FIT_VERTICAL_EXAGGERATION
-      ),
-    [terrain, viewScaleMode]
-  );
-
+function TerrainLayerContent({
+  space,
+  terrain
+}: {
+  space: TerrainSpace;
+  terrain: TerrainModel;
+}) {
   return (
     <>
-      <GroundPlane baseY={space.baseY} />
-      {terrainLayer?.visible ?? true ? (
-        <>
-          <TerrainMesh terrain={terrain} space={space} />
-          <ContourLines terrain={terrain} space={space} />
-        </>
-      ) : null}
+      <TerrainMesh terrain={terrain} space={space} />
+      <ContourLines terrain={terrain} space={space} />
     </>
   );
 }
 
-function OrthophotoContent() {
+function OrthophotoLayerContent({
+  forceOverlay,
+  renderOrder
+}: {
+  forceOverlay: boolean;
+  renderOrder: number;
+}) {
   const layers = useEditorStore((state) => state.layers);
   const project = useEditorStore((state) => state.project);
   const orthophotoPreviewUrl = useEditorStore((state) => state.orthophotoPreviewUrl);
@@ -751,11 +754,71 @@ function OrthophotoContent() {
 
   return (
     <OrthophotoBaseMap
+      forceOverlay={forceOverlay}
       opacity={orthophotoLayer.opacity}
       project={project}
+      renderOrder={renderOrder}
       texture={orthophotoTexture}
       viewScaleMode={viewScaleMode}
     />
+  );
+}
+
+function LayeredSceneContent() {
+  const layers = useEditorStore((state) => state.layers);
+  const terrain = useEditorStore((state) => state.terrain);
+  const terrainGenerated = useEditorStore((state) => state.terrainGenerated);
+  const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
+  const terrainSpace = useMemo(
+    () =>
+      getTerrainSpace(
+        terrain,
+        viewScaleMode === "1:1" ? 1 : undefined,
+        viewScaleMode === "1:1"
+          ? ONE_TO_ONE_VERTICAL_EXAGGERATION
+          : FIT_VERTICAL_EXAGGERATION
+      ),
+    [terrain, viewScaleMode]
+  );
+  const terrainLayerIndex = layers.findIndex((layer) => layer.id === "terrain-mesh");
+  const orthophotoLayerIndex = layers.findIndex(
+    (layer) => layer.id === "orthophoto-base"
+  );
+  const orthophotoAboveTerrain =
+    orthophotoLayerIndex >= 0 &&
+    (terrainLayerIndex < 0 || orthophotoLayerIndex < terrainLayerIndex);
+  const visibleLayersFromBottom = layers
+    .map((layer) => ({ layer }))
+    .filter(({ layer }) => layer.visible)
+    .reverse();
+
+  return (
+    <>
+      <GroundPlane baseY={terrainGenerated ? terrainSpace.baseY : -0.12} />
+      {visibleLayersFromBottom.map(({ layer }, renderIndex) => {
+        if (layer.id === "orthophoto-base") {
+          return (
+            <OrthophotoLayerContent
+              forceOverlay={orthophotoAboveTerrain}
+              key={layer.id}
+              renderOrder={renderIndex + 1}
+            />
+          );
+        }
+
+        if (layer.id === "terrain-mesh" && terrainGenerated) {
+          return (
+            <TerrainLayerContent
+              key={layer.id}
+              space={terrainSpace}
+              terrain={terrain}
+            />
+          );
+        }
+
+        return null;
+      })}
+    </>
   );
 }
 
@@ -941,7 +1004,6 @@ function SceneLights() {
 
 export function TerrainScene() {
   const terrain = useEditorStore((state) => state.terrain);
-  const terrainGenerated = useEditorStore((state) => state.terrainGenerated);
   const activeMode = useEditorStore((state) => state.activeMode);
   const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
 
@@ -1029,8 +1091,7 @@ export function TerrainScene() {
         zoom={isTopView ? controls.topZoom : undefined}
       />
       <SceneLights />
-      <OrthophotoContent />
-      {terrainGenerated ? <TerrainContent /> : null}
+      <LayeredSceneContent />
       {isTopView ? (
         <TopViewZoomControls
           maxZoom={controls.topMaxZoom}

@@ -3,13 +3,15 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-28
 last-model: codex-gpt-5
-last-change: logged continuous heightfield contour terrain render
+last-change: logged Photoshop-style layer stack fixes
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Fixed the sidebar layer stack so generated mesh layers are inserted above existing orthophoto layers, top layers render visually on top, and orthophoto image data persists with its layer thumbnail.
+- Removed debug terrain/contour summary cards from the orthophoto setup panel and kept the layers panel reachable in the sidebar scroll flow.
 - Replaced independent contour-ring extrusion with continuous heightfield terrain rendering, keeping contour lines as overlays and smoothing USGS contour-derived heightmaps after ring constraints.
 - Changed contour terrace stacking to use zero datum as the physical base and keep the lowest contour as the first raised layer.
 - Remount 3D cameras and orbit controls when view scale or terrain camera target changes, and re-enabled 3D panning so camera controls do not lock after terrain regeneration.

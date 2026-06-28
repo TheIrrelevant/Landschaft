@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: smooth contour-derived heightfields after ring constraints
+ * last-change: persist orthophoto preview data in project snapshots
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -262,7 +262,8 @@ export const ProjectSnapshotSchema = z.object({
   layers: z.array(PlanningLayerSchema),
   terrainGenerated: z.boolean(),
   selectedLayerId: z.string().nullable(),
-  coordinateStep: z.number().int().min(0).max(4).nullable()
+  coordinateStep: z.number().int().min(0).max(4).nullable(),
+  orthophotoPreviewUrl: z.string().nullable().optional()
 });
 
 export type ProjectSnapshot = z.infer<typeof ProjectSnapshotSchema>;

@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Collapsible Photoshop-style layer list for the Landschaft sidebar.
- * last-updated: 2026-06-25
- * last-model: cursor-composer
- * last-change: keep layer panel body empty when no layers exist
+ * last-updated: 2026-06-28
+ * last-model: codex-gpt-5
+ * last-change: show orthophoto image content in its layer thumbnail
  * ---end-metadata---
  */
 import {
@@ -24,6 +24,7 @@ export function LayersPanel() {
   const {
     layers,
     reorderLayer,
+    orthophotoPreviewUrl,
     selectedLayerId,
     selectLayer,
     setLayerOpacity,
@@ -141,6 +142,11 @@ export function LayersPanel() {
                 <div
                   className={`layer-thumbnail ${getThumbnailClass(layer.kind)}`}
                   role="presentation"
+                  style={
+                    layer.kind === "orthophoto" && orthophotoPreviewUrl
+                      ? { backgroundImage: `url(${orthophotoPreviewUrl})` }
+                      : undefined
+                  }
                 />
                 <div className="layer-meta">
                   <strong>{layer.name}</strong>

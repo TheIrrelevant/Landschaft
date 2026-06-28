@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Upload-first orthophoto setup with sequential corner coordinate prompts.
- * last-updated: 2026-06-27
+ * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: display elevation-level contour diagnostics
+ * last-change: store uploaded orthophoto as layer image data
  * ---end-metadata---
  */
 import { ChevronDown, ChevronUp, CloudUpload, Image } from "lucide-react";
@@ -20,7 +20,6 @@ export function TerrainSetupPanel() {
     setCornerCoordinate,
     setOrthophotoPreview,
     setTerrainHeightSource,
-    terrain,
     terrainGenerating,
     terrainGenerationError,
     terrainHeightSource
@@ -32,7 +31,6 @@ export function TerrainSetupPanel() {
       : null;
   const activeStep = coordinateStep ?? 0;
   const isLastStep = activeStep === project.corners.length - 1;
-  const coordinatesComplete = coordinateStep === project.corners.length;
 
   return (
     <section className="terrain-setup">
@@ -65,7 +63,9 @@ export function TerrainSetupPanel() {
                 const file = event.target.files?.[0];
 
                 if (file) {
-                  setOrthophotoPreview(file.name, URL.createObjectURL(file));
+                  readFileAsDataUrl(file).then((previewUrl) => {
+                    setOrthophotoPreview(file.name, previewUrl);
+                  });
                 }
               }}
               type="file"
@@ -162,136 +162,27 @@ export function TerrainSetupPanel() {
           {terrainGenerationError ? (
             <p className="upload-note">{terrainGenerationError}</p>
           ) : null}
-
-          {coordinatesComplete ? (
-            <div className="terrain-summary">
-              <div>
-                <span>Extent</span>
-                <strong>
-                  {project.realWorldExtentMeters.width}m x{" "}
-                  {project.realWorldExtentMeters.depth}m
-                </strong>
-              </div>
-              <div>
-                <span>Accuracy</span>
-                <strong>{getAccuracyLabel(terrain.accuracyStatus)}</strong>
-              </div>
-              <div>
-                <span>Height source</span>
-                <strong>{terrain.elevationProvider}</strong>
-              </div>
-              {terrain.contourDiagnostics ? (
-                <>
-                  <div>
-                    <span>Contour data</span>
-                    <strong>
-                      {terrain.contourDiagnostics.featureCount} features,{" "}
-                      {terrain.contourDiagnostics.pathCount} paths
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Path topology</span>
-                    <strong>
-                      {terrain.contourDiagnostics.closedPathCount} closed,{" "}
-                      {terrain.contourDiagnostics.openPathCount} open,{" "}
-                      {terrain.contourDiagnostics.ringCount} rings
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Segments</span>
-                    <strong>
-                      {terrain.contourDiagnostics.segmentCount} contour segments
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Elevations</span>
-                    <strong>
-                      {formatElevationList(terrain.contourDiagnostics.elevations)}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Elevation rings</span>
-                    <strong>
-                      {formatElevationStats(
-                        terrain.contourDiagnostics.elevationStats
-                      )}
-                    </strong>
-                  </div>
-                  {terrain.contourInterval ? (
-                    <div>
-                      <span>Interval</span>
-                      <strong>{terrain.contourInterval}m</strong>
-                    </div>
-                  ) : null}
-                </>
-              ) : null}
-              <div>
-                <span>Generated</span>
-                <strong>{new Date(terrain.generatedAt).toLocaleDateString()}</strong>
-              </div>
-            </div>
-          ) : null}
         </div>
       ) : null}
     </section>
   );
 }
 
-function formatElevationStats(
-  stats: Array<{
-    elevation: number;
-    pathCount: number;
-    openPathCount: number;
-    closedPathCount: number;
-    ringCount: number;
-  }>
-) {
-  if (stats.length === 0) {
-    return "No elevation topology";
-  }
-
-  return stats
-    .map(
-      (stat) =>
-        `${stat.elevation}m: ${stat.ringCount} rings, ${stat.openPathCount} open`
-    )
-    .join(" / ");
-}
-
-function formatElevationList(elevations: number[]) {
-  if (elevations.length === 0) {
-    return "No elevation attributes";
-  }
-
-  if (elevations.length <= 10) {
-    return elevations.map((elevation) => `${elevation}m`).join(", ");
-  }
-
-  const firstValues = elevations
-    .slice(0, 5)
-    .map((elevation) => `${elevation}m`)
-    .join(", ");
-  const lastValues = elevations
-    .slice(-3)
-    .map((elevation) => `${elevation}m`)
-    .join(", ");
-
-  return `${firstValues}, ... ${lastValues}`;
-}
-
-function getAccuracyLabel(status: string) {
-  switch (status) {
-    case "survey-grade":
-      return "Survey grade";
-    case "external-dem":
-      return "Approximate external DEM";
-    case "conceptual":
-      return "Conceptual";
-    case "flat":
-      return "Flat surface";
-    default:
-      return status;
-  }
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("Image preview could not be read."));
+      }
+    });
+    reader.addEventListener("error", () => {
+      reject(new Error("Image preview could not be read."));
+    });
+    reader.readAsDataURL(file);
+  });
 }
 
 function getCornerName(label: string) {

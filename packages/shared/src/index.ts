@@ -2,9 +2,9 @@
  * ---metadata---
  * type: package-source
  * description: Shared geospatial and planning types for Landschaft apps.
- * last-updated: 2026-06-27
+ * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: keep lowest contour as first terrace layer
+ * last-change: smooth contour-derived heightfields after ring constraints
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -431,11 +431,12 @@ async function generateTerrainModelFromUsgsContours(
   const rawHeightmap = samplePoints.map((point) =>
     interpolateElevationFromContours(point, contourSegments)
   );
-  const heightmap = applyClosedContourRings(
-    smoothHeightmap(rawHeightmap, gridSize, 1),
+  const constrainedHeightmap = applyClosedContourRings(
+    smoothHeightmap(rawHeightmap, gridSize, 2),
     samplePoints,
     contourRings
   );
+  const heightmap = smoothHeightmap(constrainedHeightmap, gridSize, 1);
   const contourInterval = inferContourInterval(contourSegments);
   const minElevation = Math.min(...heightmap);
   const maxElevation = Math.max(...heightmap);

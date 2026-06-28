@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Three.js terrain preview scene for the Landschaft editor.
- * last-updated: 2026-06-27
+ * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: build contour terraces from zero datum
+ * last-change: render contour terrain as a continuous heightfield mesh
  * ---end-metadata---
  */
 import {
@@ -18,7 +18,7 @@ import {
   type ThreeToJSXElements,
   useThree
 } from "@react-three/fiber";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ACESFilmicToneMapping,
   BufferGeometry,
@@ -27,13 +27,12 @@ import {
   DoubleSide,
   Float32BufferAttribute,
   RepeatWrapping,
-  ShapeUtils,
   SRGBColorSpace,
   TextureLoader,
-  Vector2,
   type Texture
 } from "three";
 import * as THREE from "three/webgpu";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { PlanningLayer, ProjectMetadata, TerrainModel } from "@landschaft/shared";
 import { useEditorStore } from "../state/editorStore";
 
@@ -158,7 +157,6 @@ function getProjectSpace(project: ProjectMetadata, scaleOverride?: number): Proj
 }
 
 type Vec3 = [number, number, number];
-type Vec2 = [number, number];
 
 /**
  * Build a solid terrain block in local y-up space: heightmap top surface, four
@@ -185,7 +183,7 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
     return normalizedGridToLocal(
       u,
       v,
-      sampleTerracedHeightAt(terrain, space, u, v),
+      sampleHeightAt(terrain, space, u, v),
       space
     );
   };
@@ -293,181 +291,6 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
   return geometry;
 }
 
-function buildContourTerraceGeometry(terrain: TerrainModel, space: TerrainSpace) {
-  const terraces = [...(terrain.contourTerraces ?? [])]
-    .sort((a, b) => a.elevation - b.elevation);
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-
-  const addVertex = (position: Vec3, uv: [number, number]) => {
-    positions.push(position[0], position[1], position[2]);
-    uvs.push(uv[0], uv[1]);
-    return positions.length / 3 - 1;
-  };
-
-  for (const terrace of terraces) {
-    const points = dedupeContourPoints(terrace.points);
-    if (points.length < 3) {
-      continue;
-    }
-
-    const topY = elevationToSceneHeight(terrace.elevation, space);
-    const bottomY = elevationToSceneHeight(
-      getContainingLowerTerraceElevation(terrace, terraces, 0),
-      space
-    );
-    const topStart = positions.length / 3;
-
-    for (const point of points) {
-      const [x, , z] = normalizedGridToLocal(point[0], point[1], topY, space);
-      addVertex([x, topY, z], point);
-    }
-
-    const triangles = ShapeUtils.triangulateShape(
-      points.map(([u, v]) => new Vector2(u, v)),
-      []
-    );
-    const clockwise = getSignedArea(points) < 0;
-
-    for (const triangle of triangles) {
-      const [a, b, c] = triangle;
-      if (a === undefined || b === undefined || c === undefined) {
-        continue;
-      }
-
-      if (clockwise) {
-        indices.push(topStart + a, topStart + b, topStart + c);
-      } else {
-        indices.push(topStart + a, topStart + c, topStart + b);
-      }
-    }
-
-    for (let index = 0; index < points.length; index += 1) {
-      const nextIndex = (index + 1) % points.length;
-      const current = points[index];
-      const next = points[nextIndex];
-      if (!current || !next) {
-        continue;
-      }
-
-      const currentTop = normalizedGridToLocal(current[0], current[1], topY, space);
-      const nextTop = normalizedGridToLocal(next[0], next[1], topY, space);
-      const currentBottom = normalizedGridToLocal(
-        current[0],
-        current[1],
-        bottomY,
-        space
-      );
-      const nextBottom = normalizedGridToLocal(next[0], next[1], bottomY, space);
-      const a = addVertex(currentTop, current);
-      const b = addVertex(nextTop, next);
-      const c = addVertex(nextBottom, next);
-      const d = addVertex(currentBottom, current);
-      indices.push(a, b, c, a, c, d);
-    }
-  }
-
-  const geometry = new BufferGeometry();
-  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-
-  return geometry;
-}
-
-function dedupeContourPoints(points: Vec2[]) {
-  return points.filter((point, index) => {
-    const previous = points[index - 1] ?? points[points.length - 1];
-    if (!previous) {
-      return true;
-    }
-
-    return Math.hypot(point[0] - previous[0], point[1] - previous[1]) > 0.000001;
-  });
-}
-
-function getContainingLowerTerraceElevation(
-  terrace: { elevation: number; points: Vec2[] },
-  terraces: Array<{ elevation: number; points: Vec2[] }>,
-  fallbackElevation: number
-) {
-  const center = getPolygonCentroid(terrace.points);
-  let bottomElevation = fallbackElevation;
-
-  for (const candidate of terraces) {
-    if (candidate.elevation >= terrace.elevation) {
-      continue;
-    }
-
-    if (
-      candidate.elevation > bottomElevation &&
-      isPointInNormalizedPolygon(center, candidate.points)
-    ) {
-      bottomElevation = candidate.elevation;
-    }
-  }
-
-  return bottomElevation;
-}
-
-function getPolygonCentroid(points: Vec2[]): Vec2 {
-  const sum = points.reduce<Vec2>(
-    (total, point) => [total[0] + point[0], total[1] + point[1]],
-    [0, 0]
-  );
-
-  return [sum[0] / points.length, sum[1] / points.length];
-}
-
-function isPointInNormalizedPolygon(point: Vec2, polygon: Vec2[]) {
-  let inside = false;
-
-  for (
-    let currentIndex = 0, previousIndex = polygon.length - 1;
-    currentIndex < polygon.length;
-    previousIndex = currentIndex, currentIndex += 1
-  ) {
-    const current = polygon[currentIndex];
-    const previous = polygon[previousIndex];
-    if (!current || !previous) {
-      continue;
-    }
-
-    const crossesY = current[1] > point[1] !== previous[1] > point[1];
-    if (!crossesY) {
-      continue;
-    }
-
-    const intersectionX =
-      ((previous[0] - current[0]) * (point[1] - current[1])) /
-        (previous[1] - current[1]) +
-      current[0];
-
-    if (point[0] < intersectionX) {
-      inside = !inside;
-    }
-  }
-
-  return inside;
-}
-
-function getSignedArea(points: Vec2[]) {
-  let area = 0;
-  for (let index = 0; index < points.length; index += 1) {
-    const current = points[index];
-    const next = points[(index + 1) % points.length];
-    if (!current || !next) {
-      continue;
-    }
-
-    area += current[0] * next[1] - next[0] * current[1];
-  }
-
-  return area / 2;
-}
-
 /**
  * Map a grid cell (gx, gy) + a scene-unit height into local scene space.
  * Terrain is centred on (0,0): plane-X -> scene-X, grid-row -> scene-Z. Sizes
@@ -511,16 +334,6 @@ function sampleHeightAt(
   return elevationToSceneHeight(elevation, space);
 }
 
-function sampleTerracedHeightAt(
-  terrain: TerrainModel,
-  space: TerrainSpace,
-  u: number,
-  v: number
-) {
-  const elevation = sampleTerracedElevationAt(terrain, u, v);
-  return elevationToSceneHeight(elevation, space);
-}
-
 function elevationToSceneHeight(elevation: number, space: TerrainSpace) {
   return elevation * space.displayScale * space.verticalScale;
 }
@@ -544,24 +357,6 @@ function sampleElevationAt(terrain: TerrainModel, u: number, v: number) {
   const south = lerp(h01, h11, tx);
 
   return lerp(north, south, ty);
-}
-
-function sampleTerracedElevationAt(terrain: TerrainModel, u: number, v: number) {
-  const elevation = sampleElevationAt(terrain, u, v);
-
-  if (!terrain.contourInterval) {
-    return elevation;
-  }
-
-  const baseElevation =
-    Math.floor(terrain.minElevation / terrain.contourInterval) *
-    terrain.contourInterval;
-  const terrace =
-    baseElevation +
-    Math.floor((elevation - baseElevation) / terrain.contourInterval) *
-      terrain.contourInterval;
-
-  return clamp(terrace, terrain.minElevation, terrain.maxElevation);
 }
 
 function heightmapValueAt(terrain: TerrainModel, gx: number, gy: number) {
@@ -796,65 +591,6 @@ function TerrainMesh({
   );
 }
 
-function ContourTerraceMesh({
-  terrain,
-  space
-}: {
-  terrain: TerrainModel;
-  space: TerrainSpace;
-}) {
-  const geometry = useMemo(
-    () => buildContourTerraceGeometry(terrain, space),
-    [terrain, space]
-  );
-  const material = useMemo(
-    () =>
-      new THREE.MeshLambertNodeMaterial({
-        color: new Color(TERRAIN_CLAY),
-        map: createFeltTexture(),
-        side: DoubleSide
-      }),
-    []
-  );
-
-  return (
-    <mesh castShadow geometry={geometry} material={material} receiveShadow />
-  );
-}
-
-function BaseTerrainBlock({
-  terrain,
-  space
-}: {
-  terrain: TerrainModel;
-  space: TerrainSpace;
-}) {
-  const baseTopY = elevationToSceneHeight(
-    terrain.contourTerraces?.length ? 0 : terrain.minElevation,
-    space
-  );
-  const height = Math.max(baseTopY - space.baseY, 0.1);
-  const material = useMemo(
-    () =>
-      new THREE.MeshLambertNodeMaterial({
-        color: new Color(SOLID_TERRAIN_COLOR),
-        map: createSolidTerrainTexture(),
-        side: DoubleSide
-      }),
-    []
-  );
-
-  return (
-    <mesh
-      material={material}
-      position={[0, space.baseY + height / 2, 0]}
-      receiveShadow
-    >
-      <boxGeometry args={[space.sizeX, height, space.sizeZ]} />
-    </mesh>
-  );
-}
-
 function OrthophotoBaseMap({
   opacity,
   project,
@@ -993,14 +729,7 @@ function TerrainContent() {
       <GroundPlane baseY={space.baseY} />
       {terrainLayer?.visible ?? true ? (
         <>
-          {terrain.contourTerraces?.length ? (
-            <>
-              <BaseTerrainBlock terrain={terrain} space={space} />
-              <ContourTerraceMesh terrain={terrain} space={space} />
-            </>
-          ) : (
-            <TerrainMesh terrain={terrain} space={space} />
-          )}
+          <TerrainMesh terrain={terrain} space={space} />
           <ContourLines terrain={terrain} space={space} />
         </>
       ) : null}
@@ -1103,6 +832,80 @@ function TopViewZoomControls({
   }, [camera, gl, maxZoom, minZoom]);
 
   return null;
+}
+
+function PerspectiveCameraControls({
+  dampingFactor,
+  far,
+  maxDistance,
+  maxPolarAngle,
+  minDistance,
+  minPolarAngle,
+  near,
+  position,
+  target
+}: {
+  dampingFactor: number;
+  far: number;
+  maxDistance: number;
+  maxPolarAngle: number;
+  minDistance: number;
+  minPolarAngle: number;
+  near: number;
+  position: [number, number, number];
+  target: [number, number, number];
+}) {
+  const camera = useThree((state) => state.camera);
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+
+  useEffect(() => {
+    camera.position.set(position[0], position[1], position[2]);
+    camera.up.set(0, 1, 0);
+    if ("far" in camera) {
+      camera.far = far;
+      camera.near = near;
+      camera.updateProjectionMatrix();
+    }
+    camera.lookAt(target[0], target[1], target[2]);
+
+    const controls = controlsRef.current;
+    if (!controls) {
+      return;
+    }
+
+    controls.enabled = true;
+    controls.minDistance = minDistance;
+    controls.maxDistance = maxDistance;
+    controls.minPolarAngle = minPolarAngle;
+    controls.maxPolarAngle = maxPolarAngle;
+    controls.target.set(target[0], target[1], target[2]);
+    controls.update();
+  }, [
+    camera,
+    far,
+    maxDistance,
+    maxPolarAngle,
+    minDistance,
+    minPolarAngle,
+    near,
+    position,
+    target
+  ]);
+
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      dampingFactor={dampingFactor}
+      enableDamping
+      enablePan
+      makeDefault
+      maxDistance={maxDistance}
+      maxPolarAngle={maxPolarAngle}
+      minDistance={minDistance}
+      minPolarAngle={minPolarAngle}
+      target={target}
+    />
+  );
 }
 
 /**
@@ -1234,16 +1037,16 @@ export function TerrainScene() {
           minZoom={controls.topMinZoom}
         />
       ) : (
-        <OrbitControls
+        <PerspectiveCameraControls
           key={`orbit-${cameraKey}`}
           dampingFactor={0.06}
-          enableDamping
-          enablePan
-          makeDefault
+          far={controls.far}
           maxDistance={controls.maxDistance}
           maxPolarAngle={Math.PI / 2.35}
           minDistance={controls.minDistance}
           minPolarAngle={0.52}
+          near={controls.near}
+          position={cameraPosition}
           target={target}
         />
       )}

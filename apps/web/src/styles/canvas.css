@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-style
  * description: Canvas, view switcher, and right-side inspector tab styles.
- * last-updated: 2026-06-28
+ * last-updated: 2026-06-29
  * last-model: codex-gpt-5
- * last-change: add hovered feature viewport summary
+ * last-change: add bottom-center map tool dock
  * ---end-metadata---
  */
 .canvas-area {
@@ -163,6 +163,85 @@
   border-color: var(--color-border-strong);
   box-shadow: var(--shadow-pressed), var(--shadow-inset);
   color: #ffffff;
+}
+
+.tool-dock {
+  align-items: center;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  bottom: 24px;
+  box-shadow: var(--shadow-inset), var(--control-shadow);
+  display: flex;
+  gap: 8px;
+  left: 50%;
+  padding: 6px;
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 3;
+}
+
+.tool-dock-group {
+  display: flex;
+  gap: 4px;
+}
+
+.tool-dock-separator {
+  background: var(--color-border);
+  height: 24px;
+  width: 1px;
+}
+
+.tool-dock-button {
+  align-items: center;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
+  color: var(--color-text-primary);
+  display: grid;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease;
+  width: 36px;
+}
+
+.tool-dock-button:hover:not(:disabled) {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border-strong);
+}
+
+.tool-dock-button:disabled {
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.tool-dock-error {
+  background: var(--color-bg-elevated);
+  border: 1px solid rgba(154, 59, 50, 0.2);
+  border-radius: 7px;
+  bottom: calc(100% + 8px);
+  color: #8d342d;
+  font-size: 12px;
+  left: 50%;
+  line-height: 1.35;
+  margin: 0;
+  max-width: 320px;
+  padding: 7px 9px;
+  position: absolute;
+  text-align: center;
+  transform: translateX(-50%);
+  width: max-content;
+}
+
+.tool-file-input {
+  display: none;
 }
 
 .inspector-tab {

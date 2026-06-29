@@ -3,13 +3,16 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-28
 last-model: codex-gpt-5
-last-change: log checkpoint 2 completion, layer deletion, and checkpoint 3 LCA draft workflow
+  last-change: log canvas tool dock and sidebar cleanup
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Moved vector import, raster import, vector drawing, and draft LCA actions out of the sidebar into a bottom-center canvas tool dock.
+- Removed the sidebar LCA Analysis panel and its dedicated styles.
+- Exposed layer deletion on every layer row instead of limiting deletion to removable foundational and LCA layers.
 - Started Checkpoint 3 with map evidence serialization, draft LCA analysis in the sidebar, editable `lca` vector layers, review controls, and shared MCP `map_read` / `map_write_draft` handlers.
 - Completed Checkpoint 2 with project-extent clipping, georeferenced raster world-file import, vertex editing with split/merge/snap, GeoJSON export, and normalized project-metre geometry storage.
 - Added layer deletion for removable foundational and LCA layers from the sidebar layer list.

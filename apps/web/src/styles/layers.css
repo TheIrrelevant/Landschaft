@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-style
  * description: Photoshop-style layer panel for the Landschaft editor.
- * last-updated: 2026-06-28
+ * last-updated: 2026-06-29
  * last-model: codex-gpt-5
- * last-change: style vector drawing feature controls
+ * last-change: remove map tool controls from the layer panel
  * ---end-metadata---
  */
 .layers-panel {
@@ -43,47 +43,6 @@
   align-items: center;
   display: inline-flex;
   gap: 8px;
-}
-
-.layer-import-actions {
-  display: inline-flex;
-  gap: 6px;
-}
-
-.layer-action-button {
-  align-items: center;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 12.5px;
-  gap: 6px;
-  height: 28px;
-  padding: 0 9px;
-}
-
-.layer-action-button:hover {
-  border-color: var(--color-border-strong);
-}
-
-.layer-action-button.icon-only {
-  justify-content: center;
-  padding: 0;
-  width: 28px;
-}
-
-.layer-file-input {
-  display: none;
-}
-
-.layer-import-error {
-  color: var(--color-danger, #9b2f2f);
-  font-size: 12px;
-  line-height: 1.35;
-  margin: -2px 24px 0;
 }
 
 .layer-control-label {

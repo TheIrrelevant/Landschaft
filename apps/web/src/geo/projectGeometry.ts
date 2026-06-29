@@ -24,7 +24,6 @@ import type {
   GeoJsonProperties,
   LineString,
   MultiLineString,
-  Point,
   Polygon,
   Position
 } from "geojson";

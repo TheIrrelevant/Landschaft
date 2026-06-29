@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Main Landschaft editor shell.
- * last-updated: 2026-06-25
- * last-model: cursor-composer
- * last-change: add selected feature move controls
+ * last-updated: 2026-06-29
+ * last-model: codex-gpt-5
+ * last-change: move map import drawing and LCA actions into the canvas tool dock
  * ---end-metadata---
  */
 import {
@@ -24,8 +24,8 @@ import { TerrainScene } from "../scene/TerrainScene";
 import { useEditorStore } from "../state/editorStore";
 import { LandschaftLogo } from "./LandschaftLogo";
 import { LayersPanel } from "./LayersPanel";
-import { LcaAnalysisPanel } from "./LcaAnalysisPanel";
 import { TerrainSetupPanel } from "./TerrainSetupPanel";
+import { ToolDock } from "./ToolDock";
 import { UserPanel } from "./UserPanel";
 import { ViewportOverlay } from "./ViewportOverlay";
 
@@ -44,7 +44,6 @@ export function App() {
           </header>
           <TerrainSetupPanel />
           <LayersPanel />
-          <LcaAnalysisPanel />
           <UserPanel />
         </div>
         <button
@@ -79,6 +78,7 @@ export function App() {
           </div>
           <TerrainScene />
           <ViewportOverlay />
+          <ToolDock />
           {!inspectorOpen ? (
             <button
               aria-controls="layer-inspector"

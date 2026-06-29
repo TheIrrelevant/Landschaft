@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: add draft LCA analysis workflow and layer review controls
+ * last-change: allow every layer row to be deleted
  * ---end-metadata---
  */
 import {
@@ -145,14 +145,8 @@ const baseTerrainRequest: TerrainGenerationRequest = {
 const initialTerrainProject = generateTerrainProject(baseTerrainRequest);
 const PROJECT_SNAPSHOT_STORAGE_KEY = "landschaft.project.snapshot.v3";
 
-const NON_DELETABLE_LAYER_IDS = new Set(["orthophoto-base", "terrain-mesh", "project-boundary"]);
-
 export function canDeleteLayer(layer: PlanningLayer) {
-  if (layer.locked || NON_DELETABLE_LAYER_IDS.has(layer.id)) {
-    return false;
-  }
-
-  return layer.kind === "foundational-map" || layer.kind === "lca";
+  return Boolean(layer.id);
 }
 
 function createProject(corners: OrthophotoCorner[], sourceImageName?: string) {

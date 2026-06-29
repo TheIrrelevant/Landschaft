@@ -1,9 +1,9 @@
 ---
 type: roadmap
 description: Product roadmap for the Landschaft web-based landscape planning editor.
-last-updated: 2026-06-24
+last-updated: 2026-06-28
 last-model: codex-gpt-5
-last-change: marked checkpoint 1 MVP complete
+last-change: record checkpoint 3 draft LCA workflow progress
 ---
 
 # Landschaft Roadmap
@@ -884,6 +884,40 @@ Out of scope for the first version:
 - Each layer stores source, accuracy, date, and category metadata.
 - The data stack becomes the decision foundation for future landscape editing tools.
 
+### Checkpoint 2 Progress Status
+
+Status: Complete for the MVP foundational layer workflow.
+
+Implemented so far:
+
+- Shared layer contracts now include foundational layer category, source metadata, accuracy status, geometry type, style, legend, vector features, planning impact notes, and lock state.
+- The web editor can import GeoJSON vector files and image raster overlays from the layer panel.
+- The web editor can import KML placemark point, line, polygon, and multigeometry files from the same vector import flow.
+- Uploaded GeoJSON point, line, polygon, and multipolygon features are normalized into project metre coordinates from the EPSG:4326 project extent.
+- Uploaded KML coordinates are normalized into the same project metre coordinate model.
+- Uploaded raster overlays are stored with layer data and rendered as semi-transparent map overlays.
+- The project boundary is now a first-class locked foundational layer derived from orthophoto corner extent.
+- Designer-created point, line, and polygon features can be added to a coordinate-based vector drawing layer.
+- Selected vector feature state is persisted and the inspector can switch between features to show geometry, vertex count, attributes, and planning impact.
+- Vector features rendered in the scene can be clicked directly to select the matching layer and feature in the inspector.
+- Vector feature hover state displays a temporary viewport summary with feature name and geometry type.
+- Selected vector features can be duplicated or deleted from the inspector, with locked layers protected from edits.
+- Selected vector features can be moved from the inspector with metre-based project-coordinate offsets.
+- Imported foundational layers persist in the project snapshot with visibility, order, opacity, metadata, legend, and attributes.
+- Imported foundational layers are preserved when the terrain mesh is regenerated.
+- The layer panel shows foundational categories and raster/vector geometry type labels.
+- The inspector shows source, CRS, accuracy/confidence, legend entries, feature attributes, and planning impact notes.
+- The Three.js scene renders semi-transparent raster overlays and coordinate-based vector boundaries above the orthophoto or generated terrain.
+- Imported and edited vector geometry is clipped to the project extent and stored as normalized project-metre coordinates.
+- Foundational map layers are visually clipped to the project extent in the Three.js viewport.
+- Raster imports accept optional world-file sidecars (`.pgw`, `.jgw`, `.tfw`, `.wld`) and store georeference metadata for scene placement.
+- Selected vector vertices can be edited, split on lines, merged with the next feature, and snapped to grid or nearby vertices.
+- Vector layers can be exported as GeoJSON with project metadata and WGS84 geometry.
+
+Next remaining work:
+
+- Checkpoint 3: LLM-assisted Landscape Character Assessment workflow.
+
 ## 3. LLM-Assisted Landscape Character Assessment
 
 ### Goal
@@ -1643,6 +1677,26 @@ Out of scope for the first version:
 - Users can review, edit, approve, or reject generated character areas.
 - The output separates factual baseline description from design judgement.
 - The LCA layer can be viewed in top-view and over the 3D terrain.
+
+### Checkpoint 3 Progress Status
+
+Status: In progress.
+
+Implemented so far:
+
+- Shared map evidence serialization builds layer summaries, simplified vector features, and spatial relationships from selected project layers.
+- Draft LCA analysis runs in the web editor from selected foundational input layers and assessment purpose.
+- Mock LCA draft generation creates coded character areas from polygon evidence or project-extent fallback zones.
+- Draft LCA output is stored as an editable `lca` vector layer with coded IDs, confidence, model metadata, and review status.
+- Users can review, approve, reject, and edit generated character areas through the existing inspector and vector editing tools.
+- LCA layers render in top-view and over the 3D terrain with project-extent clipping.
+- MCP `map_read` and `map_write_draft` now use the shared evidence and draft-write contracts with optional `projectSnapshot` input.
+
+Next remaining work:
+
+- Replace mock analyzer with DeepSeek-backed LCA reasoning and prompt versioning.
+- Add knowledge bank code anatomy generation and evidence citation UI.
+- Add explicit LCA analysis mode and richer spatial relationship inference.
 
 ## 4. Forces For Change And Sensitivity Capacity Assessment
 

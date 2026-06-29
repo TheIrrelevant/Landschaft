@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-style
  * description: Inspector drawer styles for the Landschaft editor.
- * last-updated: 2026-06-25
+ * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: design system tokens for inspector drawer surfaces
+ * last-change: style selected feature move controls
  * ---end-metadata---
  */
 .inspector-drawer {
@@ -64,6 +64,159 @@
   color: var(--color-text-primary);
   font-weight: var(--font-weight-regular);
   margin: 0;
+}
+
+.info-list.compact div {
+  padding: 8px 0;
+}
+
+.inspector-section {
+  display: grid;
+  gap: 10px;
+}
+
+.inspector-section h2 {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  margin: 0;
+}
+
+.legend-list {
+  display: grid;
+  gap: 8px;
+}
+
+.legend-item {
+  align-items: center;
+  color: var(--color-text-primary);
+  display: flex;
+  font-size: 12.5px;
+  gap: 8px;
+}
+
+.legend-swatch {
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  box-shadow: var(--shadow-inset-soft);
+  height: 14px;
+  width: 24px;
+}
+
+.feature-list {
+  display: grid;
+  gap: 6px;
+}
+
+.feature-list button {
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset-soft);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: flex;
+  height: auto;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.feature-list button.active {
+  border-color: var(--color-border-strong);
+  box-shadow:
+    var(--shadow-inset-soft),
+    inset 0 -2px 0 var(--color-accent);
+}
+
+.feature-list span,
+.feature-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-list span {
+  font-size: 12.5px;
+}
+
+.feature-list small {
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+  margin-left: 10px;
+}
+
+.feature-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.feature-actions .feature-action {
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset-soft);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  height: 30px;
+  justify-content: center;
+  padding: 0 10px;
+  width: auto;
+}
+
+.feature-actions .feature-action.danger {
+  color: var(--color-danger, #9b2f2f);
+}
+
+.feature-move-pad {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr 30px 30px 30px;
+}
+
+.feature-move-pad .move-step {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.feature-move-pad button {
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset-soft);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: grid;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  width: 30px;
+}
+
+.impact-note {
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.impact-list {
+  color: var(--color-text-secondary);
+  display: grid;
+  font-size: 12.5px;
+  gap: 8px;
+  line-height: 1.45;
+  margin: 0;
+  padding-left: 18px;
 }
 
 @media (max-width: 920px) {

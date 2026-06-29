@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-style
  * description: Canvas, view switcher, and right-side inspector tab styles.
- * last-updated: 2026-06-25
- * last-model: cursor-composer
- * last-change: top-right viewport overlay (fps + view scale)
+ * last-updated: 2026-06-28
+ * last-model: codex-gpt-5
+ * last-change: add hovered feature viewport summary
  * ---end-metadata---
  */
 .canvas-area {
@@ -26,7 +26,8 @@
 }
 
 .viewport-stat,
-.viewport-scale {
+.viewport-scale,
+.viewport-feature {
   align-items: center;
   background: var(--panel-bg-strong);
   border: 1px solid var(--color-border);
@@ -36,6 +37,38 @@
   gap: 8px;
   height: 30px;
   padding: 0 10px;
+}
+
+.viewport-feature {
+  align-items: flex-start;
+  display: grid;
+  gap: 2px;
+  height: auto;
+  justify-items: end;
+  max-width: min(280px, calc(100vw - 32px));
+  min-height: 42px;
+  padding: 8px 10px;
+  text-align: right;
+}
+
+.viewport-feature strong,
+.viewport-feature small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewport-feature strong {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  max-width: 100%;
+}
+
+.viewport-feature small {
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+  max-width: 100%;
 }
 
 .viewport-stat-label {

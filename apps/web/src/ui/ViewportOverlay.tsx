@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Top-right viewport overlay with live FPS and view scale control.
- * last-updated: 2026-06-26
- * last-model: amelia(claude-opus-4-8)
- * last-change: added FPS counter and fit / 1:1 view scale toggle
+ * last-updated: 2026-06-28
+ * last-model: codex-gpt-5
+ * last-change: show hovered vector feature inspection summary
  * ---end-metadata---
  */
 import { useEffect, useRef, useState } from "react";
@@ -38,13 +38,27 @@ function useFps() {
 
 export function ViewportOverlay() {
   const fps = useFps();
+  const hoveredFeatureId = useEditorStore((state) => state.hoveredFeatureId);
+  const hoveredLayerId = useEditorStore((state) => state.hoveredLayerId);
+  const layers = useEditorStore((state) => state.layers);
   const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
   const setViewScaleMode = useEditorStore((state) => state.setViewScaleMode);
   const fpsRef = useRef(fps);
   fpsRef.current = fps;
+  const hoveredLayer = layers.find((layer) => layer.id === hoveredLayerId);
+  const hoveredFeature = hoveredLayer?.features?.find(
+    (feature) => feature.id === hoveredFeatureId
+  );
 
   return (
     <div className="viewport-overlay">
+      {hoveredFeature ? (
+        <div className="viewport-feature">
+          <span className="viewport-stat-label">Feature</span>
+          <strong>{hoveredFeature.label}</strong>
+          <small>{hoveredFeature.geometryType}</small>
+        </div>
+      ) : null}
       <div className="viewport-stat">
         <span className="viewport-stat-label">FPS</span>
         <span className="viewport-stat-value">{fps}</span>

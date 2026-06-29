@@ -3,13 +3,23 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-28
 last-model: codex-gpt-5
-last-change: logged Photoshop-style layer stack fixes
+last-change: log checkpoint 2 completion, layer deletion, and checkpoint 3 LCA draft workflow
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Started Checkpoint 3 with map evidence serialization, draft LCA analysis in the sidebar, editable `lca` vector layers, review controls, and shared MCP `map_read` / `map_write_draft` handlers.
+- Completed Checkpoint 2 with project-extent clipping, georeferenced raster world-file import, vertex editing with split/merge/snap, GeoJSON export, and normalized project-metre geometry storage.
+- Added layer deletion for removable foundational and LCA layers from the sidebar layer list.
+- Added inspector operations for duplicating and deleting selected editable/imported vector features while respecting locked layers.
+- Added hover inspection for vector map features with a viewport summary and pointer cursor feedback.
+- Added direct canvas picking for vector map features so clicking imported or designer-created features selects the matching layer and feature in the inspector.
+- Added KML vector import for placemark point, line, polygon, and multigeometry data, normalized into project metre coordinates through the shared vector layer flow.
+- Added designer-created vector feature creation for point, line, and polygon features, persisted selected-feature state, and selectable feature attribute inspection in the inspector.
+- Added real GeoJSON vector import, raster image overlay import, first-class project boundary layers, persisted raster overlay data, and terrain-regeneration preservation for imported foundational layers.
+- Started Checkpoint 2 with foundational map layer metadata, sample vector/raster imports, layer category labels, legends, attribute inspection, and semi-transparent overlays aligned to the project terrain scene.
 - Fixed the sidebar layer stack so generated mesh layers are inserted above existing orthophoto layers, top layers render visually on top, and orthophoto image data persists with its layer thumbnail.
 - Removed debug terrain/contour summary cards from the orthophoto setup panel and kept the layers panel reachable in the sidebar scroll flow.
 - Replaced independent contour-ring extrusion with continuous heightfield terrain rendering, keeping contour lines as overlays and smoothing USGS contour-derived heightmaps after ring constraints.

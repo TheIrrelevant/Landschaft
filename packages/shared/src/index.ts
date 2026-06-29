@@ -4,10 +4,23 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: persist orthophoto preview data in project snapshots
+ * last-change: add raster georeference, geometry helpers, and LCA map evidence exports
  * ---end-metadata---
  */
 import { z } from "zod";
+import { RasterGeoreferenceSchema, type RasterGeoreference } from "./geometry.js";
+
+export {
+  createProjectFitRasterGeoreference,
+  getProjectExtentBbox,
+  isCoordinateInsideExtent,
+  ProjectCoordinateSchema,
+  RasterGeoreferenceSchema,
+  type ProjectCoordinate,
+  type ProjectExtentBbox,
+  type ProjectExtentSource,
+  type RasterGeoreference
+} from "./geometry.js";
 
 export const CoordinateSchema = z.tuple([z.number(), z.number()]);
 export const Coordinate3Schema = z.tuple([z.number(), z.number(), z.number()]);
@@ -238,13 +251,136 @@ export const ReviewStatusSchema = z.enum([
   "rejected"
 ]);
 
+export const FoundationalLayerCategorySchema = z.enum([
+  "project-boundary",
+  "tectonic-seismic",
+  "geology",
+  "soil",
+  "geomorphology",
+  "hydrology",
+  "climate",
+  "ecology-vegetation",
+  "land-use-settlement",
+  "infrastructure-utilities",
+  "legal-planning",
+  "risk-suitability",
+  "designer-created"
+]);
+
+export type FoundationalLayerCategory = z.infer<
+  typeof FoundationalLayerCategorySchema
+>;
+
+export const LayerAccuracyStatusSchema = z.enum([
+  "survey-grade",
+  "public-dataset",
+  "provider-derived",
+  "manual",
+  "conceptual"
+]);
+
+export type LayerAccuracyStatus = z.infer<typeof LayerAccuracyStatusSchema>;
+
+export const LayerGeometryTypeSchema = z.enum([
+  "raster",
+  "point",
+  "line",
+  "polygon",
+  "mixed"
+]);
+
+export type LayerGeometryType = z.infer<typeof LayerGeometryTypeSchema>;
+
+export const LayerLegendItemSchema = z.object({
+  label: z.string(),
+  color: z.string()
+});
+
+export interface LayerLegendItem {
+  label: string;
+  color: string;
+}
+
+export const LayerSourceMetadataSchema = z.object({
+  sourceName: z.string(),
+  sourceType: z.enum([
+    "user-upload",
+    "public-open-data",
+    "external-api",
+    "manual",
+    "derived"
+  ]),
+  sourceDate: z.string().optional(),
+  version: z.string().optional(),
+  coordinateReferenceSystem: z.string(),
+  accuracyStatus: LayerAccuracyStatusSchema,
+  confidence: z.number().min(0).max(1)
+});
+
+export interface LayerSourceMetadata {
+  sourceName: string;
+  sourceType:
+    | "user-upload"
+    | "public-open-data"
+    | "external-api"
+    | "manual"
+    | "derived";
+  sourceDate?: string;
+  version?: string;
+  coordinateReferenceSystem: string;
+  accuracyStatus: LayerAccuracyStatus;
+  confidence: number;
+}
+
+export const LayerStyleSchema = z.object({
+  stroke: z.string(),
+  fill: z.string(),
+  strokeWidth: z.number().positive(),
+  symbol: z.string().optional()
+});
+
+export interface LayerStyle {
+  stroke: string;
+  fill: string;
+  strokeWidth: number;
+  symbol?: string;
+}
+
+export const VectorFeatureSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  geometryType: z.enum(["point", "line", "polygon"]),
+  coordinates: z.array(CoordinateSchema).min(1),
+  attributes: z.record(z.string(), z.string()),
+  planningImpact: z.string()
+});
+
+export interface VectorFeature {
+  id: string;
+  label: string;
+  geometryType: "point" | "line" | "polygon";
+  coordinates: Coordinate[];
+  attributes: Record<string, string>;
+  planningImpact: string;
+}
+
 export const PlanningLayerSchema = z.object({
   id: z.string(),
   name: z.string(),
   kind: PlanningLayerKindSchema,
   visible: z.boolean(),
   opacity: z.number().min(0).max(1),
-  reviewStatus: ReviewStatusSchema
+  reviewStatus: ReviewStatusSchema,
+  category: FoundationalLayerCategorySchema.optional(),
+  geometryType: LayerGeometryTypeSchema.optional(),
+  source: LayerSourceMetadataSchema.optional(),
+  style: LayerStyleSchema.optional(),
+  legend: z.array(LayerLegendItemSchema).optional(),
+  features: z.array(VectorFeatureSchema).optional(),
+  planningImpactNotes: z.array(z.string()).optional(),
+  rasterPreviewUrl: z.string().optional(),
+  rasterGeoreference: RasterGeoreferenceSchema.optional(),
+  locked: z.boolean().optional()
 });
 
 export interface PlanningLayer {
@@ -254,6 +390,16 @@ export interface PlanningLayer {
   visible: boolean;
   opacity: number;
   reviewStatus: ReviewStatus;
+  category?: FoundationalLayerCategory;
+  geometryType?: LayerGeometryType;
+  source?: LayerSourceMetadata;
+  style?: LayerStyle;
+  legend?: LayerLegendItem[];
+  features?: VectorFeature[];
+  planningImpactNotes?: string[];
+  rasterPreviewUrl?: string;
+  rasterGeoreference?: RasterGeoreference;
+  locked?: boolean;
 }
 
 export const ProjectSnapshotSchema = z.object({
@@ -262,6 +408,7 @@ export const ProjectSnapshotSchema = z.object({
   layers: z.array(PlanningLayerSchema),
   terrainGenerated: z.boolean(),
   selectedLayerId: z.string().nullable(),
+  selectedFeatureId: z.string().nullable().optional(),
   coordinateStep: z.number().int().min(0).max(4).nullable(),
   orthophotoPreviewUrl: z.string().nullable().optional()
 });
@@ -1056,3 +1203,22 @@ export interface MapWriteDraftRequest {
   features: CodedArea[];
   reason: string;
 }
+
+export {
+  buildMapEvidence,
+  getDefaultLcaInputLayerIds,
+  type MapEvidenceFeature,
+  type MapLayerSummary,
+  type MapReadResult,
+  type MapSpatialRelationship
+} from "./mapEvidence.js";
+
+export {
+  applyMapWriteDraft,
+  createLcaLayerFromDraft,
+  generateLcaCodedId,
+  generateMockLcaDraft,
+  type LcaDraftAnalysisRequest,
+  type LcaDraftAnalysisResult,
+  type MapWriteDraftResult
+} from "./lca.js";

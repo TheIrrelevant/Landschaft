@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: render scene layers from the Photoshop-style layer order
+ * last-change: add hover inspection events for vector map features
  * ---end-metadata---
  */
 import {
@@ -33,7 +33,12 @@ import {
 } from "three";
 import * as THREE from "three/webgpu";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import type { PlanningLayer, ProjectMetadata, TerrainModel } from "@landschaft/shared";
+import type {
+  Coordinate,
+  PlanningLayer,
+  ProjectMetadata,
+  TerrainModel
+} from "@landschaft/shared";
 import { useEditorStore } from "../state/editorStore";
 
 declare module "@react-three/fiber" {
@@ -63,6 +68,8 @@ function createWebGPURenderer(props: { canvas?: HTMLCanvasElement }) {
     });
     renderer.toneMapping = ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.9;
+    (renderer as unknown as { localClippingEnabled: boolean }).localClippingEnabled =
+      true;
     await renderer.init();
     return renderer;
   })();
@@ -764,6 +771,222 @@ function OrthophotoLayerContent({
   );
 }
 
+function getProjectClippingPlanes(projectSpace: ProjectSpace) {
+  const halfX = projectSpace.sizeX / 2;
+  const halfZ = projectSpace.sizeZ / 2;
+
+  return [
+    new THREE.Plane(new THREE.Vector3(1, 0, 0), halfX),
+    new THREE.Plane(new THREE.Vector3(-1, 0, 0), halfX),
+    new THREE.Plane(new THREE.Vector3(0, 0, 1), halfZ),
+    new THREE.Plane(new THREE.Vector3(0, 0, -1), halfZ)
+  ];
+}
+
+function getRasterScenePlacement(
+  layer: PlanningLayer,
+  project: ProjectMetadata,
+  projectSpace: ProjectSpace,
+  lift: number,
+  terrain: TerrainModel,
+  terrainGenerated: boolean,
+  terrainSpace: TerrainSpace
+) {
+  const baseY = terrainGenerated
+    ? elevationToSceneHeight(terrain.maxElevation, terrainSpace) + lift
+    : lift;
+  const georef = layer.rasterGeoreference;
+
+  if (!georef) {
+    return {
+      position: [0, baseY, 0] as [number, number, number],
+      sizeX: projectSpace.sizeX,
+      sizeZ: projectSpace.sizeZ
+    };
+  }
+
+  const width = georef.projectMax[0] - georef.projectMin[0];
+  const depth = georef.projectMax[1] - georef.projectMin[1];
+  const centerU =
+    (georef.projectMin[0] + georef.projectMax[0]) /
+    2 /
+    project.realWorldExtentMeters.width;
+  const centerV =
+    (georef.projectMin[1] + georef.projectMax[1]) /
+    2 /
+    project.realWorldExtentMeters.depth;
+
+  return {
+    position: [
+      (centerU - 0.5) * projectSpace.sizeX,
+      baseY,
+      (centerV - 0.5) * projectSpace.sizeZ
+    ] as [number, number, number],
+    sizeX: (width / project.realWorldExtentMeters.width) * projectSpace.sizeX,
+    sizeZ: (depth / project.realWorldExtentMeters.depth) * projectSpace.sizeZ
+  };
+}
+
+function FoundationalLayerContent({
+  layer,
+  renderOrder,
+  terrain,
+  terrainGenerated,
+  terrainSpace,
+  viewScaleMode
+}: {
+  layer: PlanningLayer;
+  renderOrder: number;
+  terrain: TerrainModel;
+  terrainGenerated: boolean;
+  terrainSpace: TerrainSpace;
+  viewScaleMode: "fit" | "1:1";
+}) {
+  const project = useEditorStore((state) => state.project);
+  const selectFeatureInLayer = useEditorStore((state) => state.selectFeatureInLayer);
+  const projectSpace = useMemo(
+    () => getProjectSpace(project, viewScaleMode === "1:1" ? 1 : undefined),
+    [project, viewScaleMode]
+  );
+  const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
+  const lift = 0.08 + renderOrder * 0.018;
+  const clippingPlanes = useMemo(
+    () =>
+      layer.id === "project-boundary"
+        ? undefined
+        : getProjectClippingPlanes(projectSpace),
+    [layer.id, projectSpace]
+  );
+
+  if (layer.geometryType === "raster") {
+    const placement = getRasterScenePlacement(
+      layer,
+      project,
+      projectSpace,
+      lift,
+      terrain,
+      terrainGenerated,
+      terrainSpace
+    );
+
+    return (
+      <mesh
+        position={placement.position}
+        renderOrder={renderOrder}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <planeGeometry args={[placement.sizeX, placement.sizeZ]} />
+        <meshBasicNodeMaterial
+          clippingPlanes={clippingPlanes}
+          clipIntersection={false}
+          color={new Color(layer.style?.fill ?? "#4aa3cf")}
+          depthWrite={false}
+          map={rasterTexture ?? undefined}
+          opacity={layer.opacity}
+          transparent
+        />
+      </mesh>
+    );
+  }
+
+  if (!layer.features?.length) {
+    return null;
+  }
+
+  return (
+    <group renderOrder={renderOrder}>
+      {layer.features.map((feature) => (
+        <FeatureOverlay
+          clippingPlanes={clippingPlanes}
+          feature={feature}
+          key={feature.id}
+          layer={layer}
+          lift={lift}
+          project={project}
+          projectSpace={projectSpace}
+          selectFeatureInLayer={selectFeatureInLayer}
+          terrain={terrain}
+          terrainGenerated={terrainGenerated}
+          terrainSpace={terrainSpace}
+        />
+      ))}
+    </group>
+  );
+}
+
+function FeatureOverlay({
+  clippingPlanes,
+  feature,
+  layer,
+  lift,
+  project,
+  projectSpace,
+  selectFeatureInLayer,
+  terrain,
+  terrainGenerated,
+  terrainSpace
+}: {
+  clippingPlanes?: THREE.Plane[];
+  feature: NonNullable<PlanningLayer["features"]>[number];
+  layer: PlanningLayer;
+  lift: number;
+  project: ProjectMetadata;
+  projectSpace: ProjectSpace;
+  selectFeatureInLayer: (layerId: string, featureId: string) => void;
+  terrain: TerrainModel;
+  terrainGenerated: boolean;
+  terrainSpace: TerrainSpace;
+}) {
+  const geometry = useMemo(
+    () =>
+      buildVectorFeatureGeometry(
+        feature,
+        project,
+        projectSpace,
+        terrain,
+        terrainSpace,
+        terrainGenerated,
+        lift
+      ),
+    [feature, project, projectSpace, terrain, terrainSpace, terrainGenerated, lift]
+  );
+  const setHoveredFeature = useEditorStore((state) => state.setHoveredFeature);
+
+  if (!geometry) {
+    return null;
+  }
+
+  return (
+    <lineSegments
+      geometry={geometry}
+      onClick={(event) => {
+        event.stopPropagation();
+        selectFeatureInLayer(layer.id, feature.id);
+      }}
+      onPointerOut={(event) => {
+        event.stopPropagation();
+        document.body.style.cursor = "";
+        setHoveredFeature(null, null);
+      }}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        document.body.style.cursor = "pointer";
+        setHoveredFeature(layer.id, feature.id);
+      }}
+    >
+      <lineBasicMaterial
+        clippingPlanes={clippingPlanes}
+        clipIntersection={false}
+        color={layer.style?.stroke ?? "#2f6f4e"}
+        depthWrite={false}
+        linewidth={layer.style?.strokeWidth ?? 2}
+        opacity={layer.opacity}
+        transparent
+      />
+    </lineSegments>
+  );
+}
+
 function LayeredSceneContent() {
   const layers = useEditorStore((state) => state.layers);
   const terrain = useEditorStore((state) => state.terrain);
@@ -816,6 +1039,20 @@ function LayeredSceneContent() {
           );
         }
 
+        if (layer.kind === "foundational-map" || layer.kind === "lca") {
+          return (
+            <FoundationalLayerContent
+              key={layer.id}
+              layer={layer}
+              renderOrder={renderIndex + 2}
+              terrain={terrain}
+              terrainGenerated={terrainGenerated}
+              terrainSpace={terrainSpace}
+              viewScaleMode={viewScaleMode}
+            />
+          );
+        }
+
         return null;
       })}
     </>
@@ -824,6 +1061,109 @@ function LayeredSceneContent() {
 
 function getLayer(layers: PlanningLayer[], id: string) {
   return layers.find((layer) => layer.id === id);
+}
+
+function buildVectorFeatureGeometry(
+  feature: NonNullable<PlanningLayer["features"]>[number],
+  project: ProjectMetadata,
+  projectSpace: ProjectSpace,
+  terrain: TerrainModel,
+  terrainSpace: TerrainSpace,
+  terrainGenerated: boolean,
+  lift: number
+) {
+  const positions: number[] = [];
+  if (feature.geometryType === "point") {
+    for (const coordinate of feature.coordinates) {
+      const center = projectCoordinateToScene(
+        coordinate,
+        project,
+        projectSpace,
+        terrain,
+        terrainSpace,
+        terrainGenerated,
+        lift
+      );
+      const markerSize = Math.max(projectSpace.sizeX, projectSpace.sizeZ) * 0.012;
+      positions.push(
+        center[0] - markerSize,
+        center[1],
+        center[2],
+        center[0] + markerSize,
+        center[1],
+        center[2],
+        center[0],
+        center[1],
+        center[2] - markerSize,
+        center[0],
+        center[1],
+        center[2] + markerSize
+      );
+    }
+  } else {
+    const coordinates =
+      feature.geometryType === "polygon"
+        ? closeRing(feature.coordinates)
+        : feature.coordinates;
+
+    for (let index = 0; index < coordinates.length - 1; index += 1) {
+      const start = projectCoordinateToScene(
+        coordinates[index],
+        project,
+        projectSpace,
+        terrain,
+        terrainSpace,
+        terrainGenerated,
+        lift
+      );
+      const end = projectCoordinateToScene(
+        coordinates[index + 1],
+        project,
+        projectSpace,
+        terrain,
+        terrainSpace,
+        terrainGenerated,
+        lift
+      );
+      positions.push(...start, ...end);
+    }
+  }
+
+  if (positions.length === 0) {
+    return null;
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  return geometry;
+}
+
+function closeRing(coordinates: Coordinate[]) {
+  const first = coordinates[0];
+  const last = coordinates[coordinates.length - 1];
+  if (!first || !last || (first[0] === last[0] && first[1] === last[1])) {
+    return coordinates;
+  }
+
+  return [...coordinates, first];
+}
+
+function projectCoordinateToScene(
+  coordinate: Coordinate,
+  project: ProjectMetadata,
+  projectSpace: ProjectSpace,
+  terrain: TerrainModel,
+  terrainSpace: TerrainSpace,
+  terrainGenerated: boolean,
+  lift: number
+): Vec3 {
+  const u = clamp(coordinate[0] / project.realWorldExtentMeters.width, 0, 1);
+  const v = clamp(coordinate[1] / project.realWorldExtentMeters.depth, 0, 1);
+  const x = (u - 0.5) * projectSpace.sizeX;
+  const z = (v - 0.5) * projectSpace.sizeZ;
+  const y = terrainGenerated ? sampleHeightAt(terrain, terrainSpace, u, v) + lift : lift;
+
+  return [x, y, z];
 }
 
 /**

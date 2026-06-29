@@ -1,17 +1,19 @@
 /*
  * type: app-source
  * description: MCP server exposing Landschaft planning editor terrain and map tools.
- * last-updated: 2026-06-27
- * last-model: codex-gpt-5
- * last-change: route terrain generation through async elevation providers
+ * last-updated: 2026-06-28
+ * last-model: composer
+ * last-change: connect map_read and map_write_draft to shared evidence builders
  */
 import {
+  CodedAreaSchema,
   generateTerrainProjectAsync,
   TerrainGenerationRequestSchema
 } from "@landschaft/shared";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { handleMapRead, handleMapWriteDraft } from "./mapTools.js";
 
 const server = new McpServer({
   name: "landschaft",
@@ -39,42 +41,48 @@ server.tool(
     projectId: z.string(),
     selectedLayerIds: z.array(z.string()),
     extentAreaId: z.string().optional(),
-    geometryDetail: z.enum(["summary", "simplified", "full"]).default("summary")
+    geometryDetail: z.enum(["summary", "simplified", "full"]).default("summary"),
+    projectSnapshot: z.string().optional()
   },
-  async ({ projectId, selectedLayerIds, extentAreaId, geometryDetail }) => ({
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(
+  async ({ projectId, selectedLayerIds, extentAreaId, geometryDetail, projectSnapshot }) => {
+    try {
+      const result = handleMapRead(
+        {
+          projectId,
+          selectedLayerIds,
+          extentAreaId,
+          geometryDetail
+        },
+        projectSnapshot
+      );
+
+      return {
+        content: [
           {
-            projectId,
-            selectedLayerIds,
-            extentAreaId,
-            geometryDetail,
-            coordinateSystem: "project-local",
-            features: [
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
               {
-                id: "a21kd49pe2",
-                layer: "lca",
-                code: "23",
-                meaning: "Red soil on a gentle slope with settlement-edge pressure.",
-                ring: [
-                  [34, 24],
-                  [24, 25],
-                  [20, 19],
-                  [24, 35],
-                  [34, 24]
-                ],
-                confidence: 0.74
-              }
-            ]
-          },
-          null,
-          2
-        )
-      }
-    ]
-  })
+                error:
+                  error instanceof Error ? error.message : "map_read failed."
+              },
+              null,
+              2
+            )
+          }
+        ],
+        isError: true
+      };
+    }
+  }
 );
 
 server.tool(
@@ -85,37 +93,56 @@ server.tool(
     targetLayerId: z.string().optional(),
     createLayerName: z.string().optional(),
     reason: z.string(),
-    features: z.array(
-      z.object({
-        id: z.string(),
-        layer: z.string(),
-        code: z.string(),
-        meaning: z.string(),
-        confidence: z.number().min(0).max(1),
-        ring: z.array(z.tuple([z.number(), z.number()])).min(4)
-      })
-    )
+    projectSnapshot: z.string().optional(),
+    features: z.array(CodedAreaSchema)
   },
-  async ({ projectId, targetLayerId, createLayerName, reason, features }) => ({
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(
+  async ({
+    projectId,
+    targetLayerId,
+    createLayerName,
+    reason,
+    projectSnapshot,
+    features
+  }) => {
+    try {
+      const result = handleMapWriteDraft(
+        {
+          projectId,
+          targetLayerId,
+          createLayerName,
+          reason,
+          features
+        },
+        projectSnapshot
+      );
+
+      return {
+        content: [
           {
-            status: "draft-written",
-            projectId,
-            targetLayerId,
-            createLayerName,
-            reason,
-            featureCount: features.length,
-            reviewStatus: "needs-review"
-          },
-          null,
-          2
-        )
-      }
-    ]
-  })
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                error:
+                  error instanceof Error ? error.message : "map_write_draft failed."
+              },
+              null,
+              2
+            )
+          }
+        ],
+        isError: true
+      };
+    }
+  }
 );
 
 server.tool(

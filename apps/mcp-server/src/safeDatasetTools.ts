@@ -4,7 +4,7 @@
  * description: MCP handlers for USA safe-location dataset discovery and import.
  * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: download provider rasters via ImageServer f=image instead of broken TIFF hrefs
+ * last-change: import National Map transportation vectors for roads highways and trails
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -106,6 +106,44 @@ interface ContourResponse {
   features?: ContourFeature[];
 }
 
+interface HydroFeature {
+  attributes?: Record<string, string | number | null | undefined>;
+  geometry?: {
+    paths?: ArcGisPoint[][] | number[][][];
+    rings?: ArcGisPoint[][] | number[][][];
+  };
+}
+
+interface HydroResponse {
+  features?: HydroFeature[];
+}
+
+const nhdHydroLayerIds = {
+  flowlineSmall: 4,
+  flowlineLarge: 6,
+  waterbodyLarge: 12
+} as const;
+
+interface TransportFeature {
+  attributes?: Record<string, string | number | null | undefined>;
+  geometry?: {
+    paths?: ArcGisPoint[][] | number[][][];
+  };
+}
+
+interface TransportResponse {
+  features?: TransportFeature[];
+}
+
+const transportLayerConfig = [
+  { layerId: 29, kind: "highway", limit: 20 },
+  { layerId: 30, kind: "secondary-highway", limit: 50 },
+  { layerId: 31, kind: "connecting-road", limit: 80 },
+  { layerId: 32, kind: "local-road", limit: 120 },
+  { layerId: 33, kind: "ramp", limit: 20 },
+  { layerId: 37, kind: "trail", limit: 100 }
+] as const;
+
 const requestTimeoutMs = 18_000;
 
 const safeDatasetLocations: SafeDatasetLocation[] = [
@@ -204,13 +242,20 @@ export async function handleSafeDatasetImport(
     quality: "fast-preview",
     heightSource: "open-meteo"
   };
-  const [manifest, terrainResult, contourFeatures] = await Promise.all([
-    handleSafeDatasetManifest(location.id, selectedDatasetIds),
-    generateTerrainProjectAsync(terrainRequest),
-    selectedDatasetIds.includes("usgs-contours")
-      ? fetchContourFeatures(location, 250).catch(() => [])
-      : Promise.resolve([])
-  ]);
+  const [manifest, terrainResult, contourFeatures, hydroFeatures, transportFeatures] =
+    await Promise.all([
+      handleSafeDatasetManifest(location.id, selectedDatasetIds),
+      generateTerrainProjectAsync(terrainRequest),
+      selectedDatasetIds.includes("usgs-contours")
+        ? fetchContourFeatures(location, 250).catch(() => [])
+        : Promise.resolve([]),
+      selectedDatasetIds.includes("hydrography")
+        ? fetchHydrographyFeatures(location, 280).catch(() => [])
+        : Promise.resolve([]),
+      selectedDatasetIds.includes("transportation")
+        ? fetchTransportationFeatures(location).catch(() => [])
+        : Promise.resolve([])
+    ]);
   const assets =
     options.persistAssets === false
       ? []
@@ -220,6 +265,8 @@ export async function handleSafeDatasetImport(
     location,
     selectedDatasetIds,
     contourFeatures,
+    hydroFeatures,
+    transportFeatures,
     assets
   );
   const baseLayers = terrainResult.baseLayers.filter(
@@ -235,8 +282,7 @@ export async function handleSafeDatasetImport(
     assets,
     status: "imported",
     limitations: [
-      "NAIP and DEM clipped TIFFs are persisted under the web public provider-assets directory.",
-      "Hydrography and transportation are returned as TNM product references until vector extraction is added."
+      "NAIP and DEM clipped TIFFs are persisted under the web public provider-assets directory."
     ]
   };
 }
@@ -392,6 +438,83 @@ async function fetchContourCount(location: SafeDatasetLocation) {
   return payload.count ?? null;
 }
 
+async function fetchTransportationFeatures(location: SafeDatasetLocation) {
+  const responses = await Promise.all(
+    transportLayerConfig.map((layer) =>
+      fetchJson<TransportResponse>(
+        getTransportQueryUrl(location, layer.layerId, layer.limit, layer.kind)
+      )
+        .then((payload) =>
+          (payload.features ?? []).map((feature) => ({
+            kind: layer.kind,
+            feature
+          }))
+        )
+        .catch(() => [] as Array<{ kind: string; feature: TransportFeature }>)
+    )
+  );
+  return responses.flat();
+}
+
+function getTransportQueryUrl(
+  location: SafeDatasetLocation,
+  layerId: number,
+  limit: number,
+  layerKind: (typeof transportLayerConfig)[number]["kind"]
+) {
+  const url = new URL(
+    `https://carto.nationalmap.gov/arcgis/rest/services/transportation/MapServer/${layerId}/query`
+  );
+  url.searchParams.set("f", "json");
+  url.searchParams.set("where", "1=1");
+  url.searchParams.set(
+    "outFields",
+    layerKind === "trail" ? "maplabel,name" : "name,us_route,state_route,mtfcc_code,tnmfrc"
+  );
+  url.searchParams.set("returnGeometry", "true");
+  url.searchParams.set("geometry", bboxString(location));
+  url.searchParams.set("geometryType", "esriGeometryEnvelope");
+  url.searchParams.set("inSR", "4326");
+  url.searchParams.set("outSR", "4326");
+  url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
+  url.searchParams.set("resultRecordCount", String(limit));
+  return url;
+}
+
+async function fetchHydrographyFeatures(location: SafeDatasetLocation, limit: number) {
+  const perLayerLimit = Math.max(40, Math.ceil(limit / 3));
+  const layerIds = [
+    nhdHydroLayerIds.flowlineSmall,
+    nhdHydroLayerIds.flowlineLarge,
+    nhdHydroLayerIds.waterbodyLarge
+  ];
+  const responses = await Promise.all(
+    layerIds.map((layerId) =>
+      fetchJson<HydroResponse>(getHydroQueryUrl(location, layerId, perLayerLimit)).catch(
+        () => ({ features: [] as HydroFeature[] })
+      )
+    )
+  );
+  return responses.flatMap((response) => response.features ?? []);
+}
+
+function getHydroQueryUrl(location: SafeDatasetLocation, layerId: number, limit: number) {
+  const url = new URL(
+    `https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/${layerId}/query`
+  );
+  url.searchParams.set("f", "json");
+  url.searchParams.set("where", "1=1");
+  url.searchParams.set("outFields", "gnis_name,ftype,fcode");
+  url.searchParams.set("returnGeometry", "true");
+  url.searchParams.set("geometry", bboxString(location));
+  url.searchParams.set("geometryType", "esriGeometryEnvelope");
+  url.searchParams.set("inSR", "4326");
+  url.searchParams.set("outSR", "4326");
+  url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
+  url.searchParams.set("resultRecordCount", String(limit));
+  return url;
+}
+
 async function fetchContourFeatures(location: SafeDatasetLocation, limit: number) {
   const payload = await fetchJson<ContourResponse>(getContourQueryUrl(location, limit));
   return payload.features ?? [];
@@ -419,11 +542,21 @@ function createProviderLayers(
   location: SafeDatasetLocation,
   datasetIds: SafeDatasetId[],
   contourFeatures: ContourFeature[],
+  hydroFeatures: HydroFeature[],
+  transportFeatures: Array<{ kind: string; feature: TransportFeature }>,
   assets: PersistedRasterAsset[]
 ): PlanningLayer[] {
   return datasetIds.map((datasetId) => {
     if (datasetId === "usgs-contours") {
       return createContourLayer(project, location, contourFeatures);
+    }
+
+    if (datasetId === "hydrography") {
+      return createHydrographyLayer(project, location, hydroFeatures);
+    }
+
+    if (datasetId === "transportation") {
+      return createTransportationLayer(project, location, transportFeatures);
     }
 
     return createSourceReferenceLayer(
@@ -463,6 +596,80 @@ function createContourLayer(
     features,
     planningImpactNotes: [
       `${features.length} contour paths imported from the USGS contour service.`,
+      `Target processing CRS: ${location.targetCrs}.`
+    ],
+    locked: true
+  };
+}
+
+function createHydrographyLayer(
+  project: ProjectMetadata,
+  location: SafeDatasetLocation,
+  hydroFeatures: HydroFeature[]
+): PlanningLayer {
+  const features = hydroFeatures.flatMap((feature, featureIndex) =>
+    hydroFeatureToVectorFeatures(project, feature, featureIndex)
+  );
+
+  return {
+    id: "safe-data-hydrography",
+    name: datasetLabels.hydrography,
+    kind: "foundational-map",
+    visible: true,
+    opacity: 0.88,
+    reviewStatus: "draft",
+    category: "hydrology",
+    geometryType: "mixed",
+    source: createLayerSource(project, location, "hydrography"),
+    style: {
+      stroke: "#2f7fb8",
+      fill: "#4aa3cf",
+      strokeWidth: 2
+    },
+    legend: [
+      { label: "NHD flowline", color: "#2f7fb8" },
+      { label: "NHD waterbody", color: "#4aa3cf" }
+    ],
+    features,
+    planningImpactNotes: [
+      `${features.length} hydro features imported from the USGS NHD MapServer.`,
+      `Target processing CRS: ${location.targetCrs}.`
+    ],
+    locked: true
+  };
+}
+
+function createTransportationLayer(
+  project: ProjectMetadata,
+  location: SafeDatasetLocation,
+  transportFeatures: Array<{ kind: string; feature: TransportFeature }>
+): PlanningLayer {
+  const features = transportFeatures.flatMap(({ kind, feature }, featureIndex) =>
+    transportFeatureToVectorFeatures(project, feature, featureIndex, kind)
+  );
+
+  return {
+    id: "safe-data-transportation",
+    name: datasetLabels.transportation,
+    kind: "foundational-map",
+    visible: true,
+    opacity: 0.84,
+    reviewStatus: "draft",
+    category: "infrastructure-utilities",
+    geometryType: "line",
+    source: createLayerSource(project, location, "transportation"),
+    style: {
+      stroke: "#5a5f66",
+      fill: "#5a5f66",
+      strokeWidth: 1.5
+    },
+    legend: [
+      { label: "Highways and arterials", color: "#4a4f56" },
+      { label: "Local roads and trails", color: "#5a5f66" }
+    ],
+    features,
+    planningImpactNotes: [
+      `${features.length} transportation paths imported from the USGS National Map transportation service.`,
       `Target processing CRS: ${location.targetCrs}.`
     ],
     locked: true
@@ -680,6 +887,133 @@ function contourFeatureToVectorFeatures(
         "Provider contour line for terrain and landscape morphology review."
     };
   });
+}
+
+function hydroFeatureToVectorFeatures(
+  project: ProjectMetadata,
+  feature: HydroFeature,
+  featureIndex: number
+): VectorFeature[] {
+  const attributes = feature.attributes ?? {};
+  const name =
+    attributes.gnis_name ??
+    attributes.GNIS_NAME ??
+    attributes.ftype_desc ??
+    `Hydro ${featureIndex + 1}`;
+  const label = typeof name === "string" || typeof name === "number" ? String(name) : `Hydro ${featureIndex + 1}`;
+  const attributeEntries: Record<string, string> = {
+    source: "USGS National Hydrography Dataset"
+  };
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+    attributeEntries[key] = String(value);
+  }
+
+  const vectorFeatures: VectorFeature[] = [];
+  const paths = feature.geometry?.paths ?? [];
+  for (const [pathIndex, path] of paths.entries()) {
+    const coordinates = path.map((point) =>
+      Array.isArray(point)
+        ? mapCoordinateToProject([Number(point[0]), Number(point[1])], project)
+        : mapCoordinateToProject([point.x, point.y], project)
+    );
+    if (coordinates.length < 2) {
+      continue;
+    }
+    vectorFeatures.push({
+      id: `nhd-flowline-${featureIndex + 1}-${pathIndex + 1}`,
+      label,
+      geometryType: "line",
+      coordinates,
+      attributes: attributeEntries,
+      planningImpact: "Provider hydro flowline for drainage and watercourse review."
+    });
+  }
+
+  const rings = feature.geometry?.rings ?? [];
+  for (const [ringIndex, ring] of rings.entries()) {
+    const coordinates = ring.map((point) =>
+      Array.isArray(point)
+        ? mapCoordinateToProject([Number(point[0]), Number(point[1])], project)
+        : mapCoordinateToProject([point.x, point.y], project)
+    );
+    if (coordinates.length < 3) {
+      continue;
+    }
+    vectorFeatures.push({
+      id: `nhd-waterbody-${featureIndex + 1}-${ringIndex + 1}`,
+      label,
+      geometryType: "polygon",
+      coordinates,
+      attributes: attributeEntries,
+      planningImpact: "Provider hydro waterbody for pond, lake, and wetland review."
+    });
+  }
+
+  return vectorFeatures;
+}
+
+function transportFeatureToVectorFeatures(
+  project: ProjectMetadata,
+  feature: TransportFeature,
+  featureIndex: number,
+  layerKind: string
+): VectorFeature[] {
+  const attributes = feature.attributes ?? {};
+  const label = getTransportFeatureLabel(attributes, layerKind, featureIndex);
+  const attributeEntries: Record<string, string> = {
+    source: "USGS National Map Transportation",
+    layerKind
+  };
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+    attributeEntries[key] = String(value);
+  }
+
+  const paths = feature.geometry?.paths ?? [];
+  const vectorFeatures: VectorFeature[] = [];
+  for (const [pathIndex, path] of paths.entries()) {
+    const coordinates = path.map((point) =>
+      Array.isArray(point)
+        ? mapCoordinateToProject([Number(point[0]), Number(point[1])], project)
+        : mapCoordinateToProject([point.x, point.y], project)
+    );
+    if (coordinates.length < 2) {
+      continue;
+    }
+    vectorFeatures.push({
+      id: `ntd-${layerKind}-${featureIndex + 1}-${pathIndex + 1}`,
+      label,
+      geometryType: "line",
+      coordinates,
+      attributes: attributeEntries,
+      planningImpact: "Provider transportation path for circulation and access review."
+    });
+  }
+  return vectorFeatures;
+}
+
+function getTransportFeatureLabel(
+  attributes: Record<string, string | number | null | undefined>,
+  layerKind: string,
+  featureIndex: number
+) {
+  const name = attributes.name ?? attributes.maplabel;
+  if (typeof name === "string" && name.trim()) {
+    return name.trim();
+  }
+  if (typeof attributes.us_route === "string" && attributes.us_route.trim()) {
+    return `US Route ${attributes.us_route.trim()}`;
+  }
+  if (typeof attributes.state_route === "string" && attributes.state_route.trim()) {
+    return `State Route ${attributes.state_route.trim()}`;
+  }
+
+  return `${layerKind.replace(/-/g, " ")} ${featureIndex + 1}`;
 }
 
 function createLayerSource(

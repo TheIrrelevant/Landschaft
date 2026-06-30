@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: make safe dataset bridge URL configurable
+ * last-change: stop auto-creating project boundary layer on import
  * ---end-metadata---
  */
 import {
@@ -269,61 +269,6 @@ function createOrthophotoLayer(): PlanningLayer {
     visible: true,
     opacity: 1,
     reviewStatus: "draft"
-  };
-}
-
-function createProjectBoundaryLayer(project: ProjectMetadata): PlanningLayer {
-  const { width, depth } = project.realWorldExtentMeters;
-
-  return {
-    id: "project-boundary",
-    name: "Project Boundary",
-    kind: "foundational-map",
-    visible: true,
-    opacity: 0.95,
-    reviewStatus: "draft",
-    category: "project-boundary",
-    geometryType: "polygon",
-    source: {
-      sourceName: "Orthophoto corner extent",
-      sourceType: "derived",
-      sourceDate: "2026-06-28",
-      coordinateReferenceSystem: project.coordinateReferenceSystem,
-      accuracyStatus: "provider-derived",
-      confidence: 0.82
-    },
-    style: {
-      stroke: "#111111",
-      fill: "#ffffff",
-      strokeWidth: 2
-    },
-    legend: [{ label: "Project extent", color: "#111111" }],
-    features: [
-      {
-        id: "project-boundary-feature",
-        label: "Project boundary",
-        geometryType: "polygon",
-        coordinates: [
-          [0, 0],
-          [width, 0],
-          [width, depth],
-          [0, depth],
-          [0, 0]
-        ],
-        attributes: {
-          source: "Orthophoto corners",
-          crs: project.coordinateReferenceSystem,
-          width: `${Math.round(width)} m`,
-          depth: `${Math.round(depth)} m`
-        },
-        planningImpact:
-          "Defines the clipped working extent for imported contextual layers."
-      }
-    ],
-    planningImpactNotes: [
-      "Use this extent as the first visual clip boundary for imported layers."
-    ],
-    locked: true
   };
 }
 
@@ -649,10 +594,6 @@ function insertOrReplaceLayer(layers: PlanningLayer[], nextLayer: PlanningLayer)
   const nextLayers = [...layers];
   nextLayers.splice(insertIndex, 0, nextLayer);
   return nextLayers;
-}
-
-function ensureProjectBoundaryLayer(layers: PlanningLayer[], project: ProjectMetadata) {
-  return insertOrReplaceLayer(layers, createProjectBoundaryLayer(project));
 }
 
 function getSafeDatasetLocation(locationId: string | null) {
@@ -1100,10 +1041,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
           return 0;
         });
-      const layers = ensureProjectBoundaryLayer(
-        [...preservedContextLayers, ...baseLayers],
-        result.project
-      );
+      const layers = [...preservedContextLayers, ...baseLayers];
       const nextState = {
         project: result.project,
         terrain: result.terrain,
@@ -1641,8 +1579,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       activeMode: "terrain-3d",
       project,
       terrainHeightSource: heightSource,
-      layers: ensureProjectBoundaryLayer(queuedLayers, project),
-      selectedLayerId: "project-boundary",
+      layers: queuedLayers,
+      selectedLayerId: queuedLayers[0]?.id ?? null,
       selectedFeatureId: null,
       selectedArea: null,
       selectedVertexIndex: null,
@@ -1658,7 +1596,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     try {
       const result = await fetchSafeDatasetImport(location.id, datasetIds);
-      const layers = ensureProjectBoundaryLayer(result.layers, result.project);
+      const layers = result.layers;
       const nextState = {
         activeMode: "terrain-3d" as const,
         project: result.project,
@@ -1706,7 +1644,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ...state.project,
         sourceImageName: fileName
       };
-      const layers = ensureProjectBoundaryLayer([createOrthophotoLayer()], project);
+      const layers = [createOrthophotoLayer()];
       const nextState = {
         activeMode: "top-view" as const,
         coordinateStep: 0,

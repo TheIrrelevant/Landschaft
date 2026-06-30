@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: keep shadowMaterial disabled to avoid terrain base blink
+ * last-change: use zero-centered green-blue-red diverging DEM colormap
  * ---end-metadata---
  */
 import {
@@ -38,6 +38,7 @@ import type {
   Coordinate,
   PlanningLayer,
   ProjectMetadata,
+  RasterGeoreference,
   TerrainModel
 } from "@landschaft/shared";
 import { useEditorStore } from "../state/editorStore";
@@ -101,6 +102,8 @@ const ONE_TO_ONE_VERTICAL_EXAGGERATION = 4.5;
 // point reads as a carved model.
 const BASE_DEPTH_METERS = 40;
 const GROUND_GRID_OFFSET = 0.08;
+const RASTER_DRAPE_LIFT = 0.04;
+const DEM_DRAPE_LIFT = 0.055;
 
 /**
  * The terrain coordinate space.
@@ -380,6 +383,66 @@ function getRenderGridSize(terrain: TerrainModel) {
   return Math.max(terrain.gridSize, RENDER_TERRAIN_GRID_SIZE);
 }
 
+function projectUvFromGeoreference(
+  u: number,
+  v: number,
+  project: ProjectMetadata,
+  georef: RasterGeoreference
+): [number, number] {
+  const projectX = u * project.realWorldExtentMeters.width;
+  const projectY = v * project.realWorldExtentMeters.depth;
+  const rasterWidth = Math.max(georef.projectMax[0] - georef.projectMin[0], 0.01);
+  const rasterDepth = Math.max(georef.projectMax[1] - georef.projectMin[1], 0.01);
+  const rasterU = (projectX - georef.projectMin[0]) / rasterWidth;
+  const rasterV = 1 - (projectY - georef.projectMin[1]) / rasterDepth;
+
+  return [clamp(rasterU, 0, 1), clamp(rasterV, 0, 1)];
+}
+
+function buildDrapedRasterGeometry(
+  terrain: TerrainModel,
+  terrainSpace: TerrainSpace,
+  project: ProjectMetadata,
+  georef: RasterGeoreference,
+  lift: number
+) {
+  const grid = getRenderGridSize(terrain);
+  const last = grid - 1;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  for (let gy = 0; gy < grid; gy += 1) {
+    for (let gx = 0; gx < grid; gx += 1) {
+      const u = gx / last;
+      const v = gy / last;
+      const height = sampleHeightAt(terrain, terrainSpace, u, v) + lift;
+      const [x, y, z] = normalizedGridToLocal(u, v, height, terrainSpace);
+      const [rasterU, rasterV] = projectUvFromGeoreference(u, v, project, georef);
+      positions.push(x, y, z);
+      uvs.push(rasterU, rasterV);
+    }
+  }
+
+  for (let gy = 0; gy < last; gy += 1) {
+    for (let gx = 0; gx < last; gx += 1) {
+      const a = gy * grid + gx;
+      const b = gy * grid + gx + 1;
+      const c = (gy + 1) * grid + gx + 1;
+      const d = (gy + 1) * grid + gx;
+      indices.push(a, c, b);
+      indices.push(a, d, c);
+    }
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function lerp(start: number, end: number, amount: number) {
   return start + (end - start) * amount;
 }
@@ -600,7 +663,17 @@ function loadImageTexture(url: string) {
   });
 }
 
+function isOrthophotoGeoTiffUrl(url: string) {
+  return /naip-ortho|orthophoto/i.test(url);
+}
+
 async function loadGeoTiffTexture(url: string) {
+  return isOrthophotoGeoTiffUrl(url)
+    ? loadGeoTiffRgbTexture(url)
+    : loadGeoTiffScalarTexture(url);
+}
+
+async function loadGeoTiffRgbTexture(url: string) {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`GeoTIFF texture request failed: ${response.status}`);
@@ -611,12 +684,12 @@ async function loadGeoTiffTexture(url: string) {
   const width = image.getWidth();
   const height = image.getHeight();
   const sampleCount = image.getSamplesPerPixel();
-  const samples = sampleCount >= 3 ? [0, 1, 2] : [0];
+  const rgbSamples = sampleCount >= 3 ? [0, 1, 2] : [0];
   const raster = (await image.readRasters({
     interleave: true,
-    samples
+    samples: rgbSamples
   })) as ArrayLike<number>;
-  const range = getRasterDisplayRange(raster, sampleCount >= 3 ? 3 : 1);
+  const stride = rgbSamples.length;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -626,27 +699,14 @@ async function loadGeoTiffTexture(url: string) {
   }
 
   const imageData = context.createImageData(width, height);
-  const channels = sampleCount >= 3 ? 3 : 1;
   for (let index = 0; index < width * height; index += 1) {
     const offset = index * 4;
-    if (channels === 3) {
-      imageData.data[offset] = normalizeRasterTone(
-        Number(raster[index * 3]),
-        range.min,
-        range.max
-      );
-      imageData.data[offset + 1] = normalizeRasterTone(
-        Number(raster[index * 3 + 1]),
-        range.min,
-        range.max
-      );
-      imageData.data[offset + 2] = normalizeRasterTone(
-        Number(raster[index * 3 + 2]),
-        range.min,
-        range.max
-      );
+    if (stride >= 3) {
+      imageData.data[offset] = clampByte(Number(raster[index * stride]));
+      imageData.data[offset + 1] = clampByte(Number(raster[index * stride + 1]));
+      imageData.data[offset + 2] = clampByte(Number(raster[index * stride + 2]));
     } else {
-      const tone = normalizeRasterTone(Number(raster[index]), range.min, range.max);
+      const tone = clampByte(Number(raster[index]));
       imageData.data[offset] = tone;
       imageData.data[offset + 1] = tone;
       imageData.data[offset + 2] = tone;
@@ -657,9 +717,95 @@ async function loadGeoTiffTexture(url: string) {
 
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
+  texture.flipY = true;
   texture.anisotropy = 4;
   texture.needsUpdate = true;
   return texture;
+}
+
+function lerpRgb(
+  start: [number, number, number],
+  end: [number, number, number],
+  tone: number
+): [number, number, number] {
+  const clamped = Math.min(Math.max(tone, 0), 1);
+  return [
+    Math.round(start[0] + (end[0] - start[0]) * clamped),
+    Math.round(start[1] + (end[1] - start[1]) * clamped),
+    Math.round(start[2] + (end[2] - start[2]) * clamped)
+  ];
+}
+
+function elevationToDivergingRgb(
+  elevation: number,
+  minElevation: number,
+  maxElevation: number
+): [number, number, number] {
+  const green: [number, number, number] = [46, 168, 62];
+  const blue: [number, number, number] = [42, 104, 220];
+  const red: [number, number, number] = [220, 58, 42];
+
+  if (elevation >= 0) {
+    const maxPositive = Math.max(maxElevation, 0.0001);
+    return lerpRgb(green, red, elevation / maxPositive);
+  }
+
+  const minNegative = Math.min(minElevation, -0.0001);
+  return lerpRgb(green, blue, elevation / minNegative);
+}
+
+async function loadGeoTiffScalarTexture(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`GeoTIFF texture request failed: ${response.status}`);
+  }
+
+  const tiff = await fromArrayBuffer(await response.arrayBuffer());
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const raster = (await image.readRasters({
+    interleave: true,
+    samples: [0]
+  })) as ArrayLike<number>;
+  const range = getRasterDisplayRange(raster, 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("GeoTIFF texture canvas could not be created.");
+  }
+
+  const imageData = context.createImageData(width, height);
+  for (let index = 0; index < width * height; index += 1) {
+    const value = Number(raster[index]);
+    const [red, green, blue] =
+      !Number.isFinite(value) || value <= -9999
+        ? ([42, 104, 220] as [number, number, number])
+        : elevationToDivergingRgb(value, range.min, range.max);
+    const offset = index * 4;
+    imageData.data[offset] = red;
+    imageData.data[offset + 1] = green;
+    imageData.data[offset + 2] = blue;
+    imageData.data[offset + 3] = 255;
+  }
+  context.putImageData(imageData, 0, 0);
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.flipY = true;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function clampByte(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.round(Math.min(Math.max(value, 0), 255));
 }
 
 function getRasterDisplayRange(raster: ArrayLike<number>, stride: number) {
@@ -941,6 +1087,67 @@ function getRasterScenePlacement(
   };
 }
 
+
+function shouldDrapeRasterLayer(layer: PlanningLayer, terrainGenerated: boolean) {
+  return (
+    terrainGenerated &&
+    layer.geometryType === "raster" &&
+    Boolean(layer.rasterGeoreference) &&
+    Boolean(layer.rasterPreviewUrl) &&
+    (layer.kind === "orthophoto" || layer.id === "safe-data-dem-3dep")
+  );
+}
+
+function getDrapeLift(layer: PlanningLayer) {
+  return layer.id === "safe-data-dem-3dep" ? DEM_DRAPE_LIFT : RASTER_DRAPE_LIFT;
+}
+
+function DrapedRasterMesh({
+  georef,
+  layer,
+  project,
+  renderOrder,
+  terrain,
+  terrainSpace
+}: {
+  georef: RasterGeoreference;
+  layer: PlanningLayer;
+  project: ProjectMetadata;
+  renderOrder: number;
+  terrain: TerrainModel;
+  terrainSpace: TerrainSpace;
+}) {
+  const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
+  const geometry = useMemo(
+    () =>
+      buildDrapedRasterGeometry(
+        terrain,
+        terrainSpace,
+        project,
+        georef,
+        getDrapeLift(layer)
+      ),
+    [terrain, terrainSpace, project, georef, layer.id]
+  );
+
+  if (!rasterTexture) {
+    return null;
+  }
+
+  return (
+    <mesh geometry={geometry} renderOrder={renderOrder}>
+      <meshBasicNodeMaterial
+        color={new Color("#ffffff")}
+        depthWrite={false}
+        map={rasterTexture}
+        opacity={layer.opacity}
+        side={DoubleSide}
+        transparent
+      />
+    </mesh>
+  );
+}
+
 function FoundationalLayerContent({
   layer,
   renderOrder,
@@ -973,6 +1180,19 @@ function FoundationalLayerContent({
   );
 
   if (layer.geometryType === "raster") {
+    if (shouldDrapeRasterLayer(layer, terrainGenerated)) {
+      return (
+        <DrapedRasterMesh
+          georef={layer.rasterGeoreference!}
+          layer={layer}
+          project={project}
+          renderOrder={renderOrder}
+          terrain={terrain}
+          terrainSpace={terrainSpace}
+        />
+      );
+    }
+
     const placement = getRasterScenePlacement(
       layer,
       project,

@@ -1664,8 +1664,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
   setLayerOpacity: (layerId, opacity) =>
     set((state) => {
+      const clampedOpacity = Math.min(1, Math.max(0, opacity));
       const layers = state.layers.map((layer) =>
-        layer.id === layerId ? { ...layer, opacity } : layer
+        layer.id === layerId ? { ...layer, opacity: clampedOpacity } : layer
       );
       saveProjectSnapshot(toProjectSnapshot({ ...state, layers }));
 

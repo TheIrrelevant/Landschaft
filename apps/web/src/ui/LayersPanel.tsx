@@ -4,7 +4,7 @@
  * description: Collapsible Photoshop-style layer list for the Landschaft sidebar.
  * last-updated: 2026-06-29
  * last-model: codex-gpt-5
- * last-change: keep map creation actions in the canvas tool dock
+ * last-change: replace opacity preset dropdown with 0-100 number input
  * ---end-metadata---
  */
 import {
@@ -16,10 +16,8 @@ import {
   Layers,
   Trash2
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { canDeleteLayer, useEditorStore } from "../state/editorStore";
-
-const OPACITY_OPTIONS = [100, 75, 50, 25, 10] as const;
 
 export function LayersPanel() {
   const {
@@ -36,7 +34,6 @@ export function LayersPanel() {
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const [dragTargetLayerId, setDragTargetLayerId] = useState<string | null>(null);
   const selectedLayer = layers.find((layer) => layer.id === selectedLayerId);
-  const selectedOpacity = Math.round((selectedLayer?.opacity ?? 1) * 100);
 
   return (
     <section className="layers-panel">
@@ -69,30 +66,21 @@ export function LayersPanel() {
             </div>
             <div className="layer-control">
               <span className="layer-control-label">Opacity</span>
-              <div className="layer-control-dropdown-wrap">
-                <select
-                  aria-label="Layer opacity"
-                  className="layer-control-dropdown layer-control-select"
-                  onChange={(event) => {
-                    if (selectedLayer) {
-                      setLayerOpacity(selectedLayer.id, Number(event.target.value) / 100);
-                    }
-                  }}
-                  value={selectedOpacity}
-                >
-                  {OPACITY_OPTIONS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}%
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  aria-hidden="true"
-                  className="layer-control-select-chevron"
-                  size={13}
-                  strokeWidth={1.75}
+              {selectedLayer ? (
+                <LayerOpacityInput
+                  layerId={selectedLayer.id}
+                  onChange={setLayerOpacity}
+                  opacity={selectedLayer.opacity}
                 />
-              </div>
+              ) : (
+                <input
+                  aria-label="Layer opacity"
+                  className="layer-control-opacity-input"
+                  disabled
+                  placeholder="—"
+                  type="text"
+                />
+              )}
             </div>
           </div>
           <div className="layer-list">
@@ -174,6 +162,57 @@ export function LayersPanel() {
         </div>
       ) : null}
     </section>
+  );
+}
+
+
+function LayerOpacityInput({
+  layerId,
+  onChange,
+  opacity
+}: {
+  layerId: string;
+  onChange: (layerId: string, opacity: number) => void;
+  opacity: number;
+}) {
+  const [draft, setDraft] = useState(() => String(Math.round(opacity * 100)));
+
+  useEffect(() => {
+    setDraft(String(Math.round(opacity * 100)));
+  }, [layerId, opacity]);
+
+  const commit = (raw: string) => {
+    const parsed = Number(raw);
+    const value = Number.isFinite(parsed)
+      ? Math.min(100, Math.max(0, Math.round(parsed)))
+      : 0;
+
+    setDraft(String(value));
+    onChange(layerId, value / 100);
+  };
+
+  return (
+    <div className="layer-control-opacity-wrap">
+      <input
+        aria-label="Layer opacity"
+        className="layer-control-opacity-input"
+        inputMode="numeric"
+        max={100}
+        min={0}
+        onBlur={() => commit(draft)}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            commit(draft);
+            event.currentTarget.blur();
+          }
+        }}
+        step={1}
+        type="number"
+        value={draft}
+      />
+      <span className="layer-control-opacity-suffix">%</span>
+    </div>
   );
 }
 

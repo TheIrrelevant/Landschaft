@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: let opaque DEM suppress orthophoto rasters below in panel stack
+ * last-change: fix draped raster opacity compositing without depth-buffer dropout
  * ---end-metadata---
  */
 import {
@@ -105,7 +105,8 @@ const GROUND_GRID_OFFSET = 0.08;
 const RASTER_DRAPE_BASE_LIFT = 0.055;
 const LAYER_STACK_LIFT_STEP = 0.035;
 const VECTOR_OVERLAY_LIFT_BONUS = 0.08;
-const OPAQUE_LAYER_OPACITY = 0.99;
+/** Only 100% opacity fully masks raster layers below in the stack. */
+const FULL_LAYER_OPACITY = 1;
 
 /**
  * The terrain coordinate space.
@@ -604,8 +605,28 @@ function createSolidTerrainTexture() {
   return texture;
 }
 
+const orthophotoTextureCache = new Map<string, Texture>();
+
+function loadOrthophotoTexture(url: string) {
+  const cached = orthophotoTextureCache.get(url);
+  if (cached) {
+    return Promise.resolve(cached);
+  }
+
+  const loader = /\.(tif|tiff)(\?|$)/i.test(url)
+    ? loadGeoTiffTexture(url)
+    : loadImageTexture(url);
+
+  return loader.then((texture) => {
+    orthophotoTextureCache.set(url, texture);
+    return texture;
+  });
+}
+
 function useOrthophotoTexture(url: string | null) {
-  const [texture, setTexture] = useState<Texture | null>(null);
+  const [texture, setTexture] = useState<Texture | null>(() =>
+    url ? orthophotoTextureCache.get(url) ?? null : null
+  );
 
   useEffect(() => {
     if (!url) {
@@ -613,19 +634,19 @@ function useOrthophotoTexture(url: string | null) {
       return undefined;
     }
 
+    const cached = orthophotoTextureCache.get(url);
+    if (cached) {
+      setTexture(cached);
+      return undefined;
+    }
+
     let cancelled = false;
-    const loadTexture = /\.(tif|tiff)(\?|$)/i.test(url)
-      ? loadGeoTiffTexture(url)
-      : loadImageTexture(url);
 
-    loadTexture
+    loadOrthophotoTexture(url)
       .then((loadedTexture) => {
-        if (cancelled) {
-          loadedTexture.dispose();
-          return;
+        if (!cancelled) {
+          setTexture(loadedTexture);
         }
-
-        setTexture(loadedTexture);
       })
       .catch(() => {
         if (!cancelled) {
@@ -635,13 +656,6 @@ function useOrthophotoTexture(url: string | null) {
 
     return () => {
       cancelled = true;
-      setTexture((currentTexture) => {
-        if (currentTexture) {
-          currentTexture.dispose();
-        }
-
-        return null;
-      });
     };
   }, [url]);
 
@@ -1134,33 +1148,16 @@ function getVectorLayerLift(layers: PlanningLayer[], layerId: string) {
   return getLayerStackLift(layers, layerId) + VECTOR_OVERLAY_LIFT_BONUS;
 }
 
-function getDrapedRasterDepthWrite(layer: PlanningLayer) {
-  if (isElevationColormapLayer(layer)) {
-    return false;
-  }
-
-  return getDrapedRasterMaterialOpacity(layer) >= OPAQUE_LAYER_OPACITY;
-}
-
 function isElevationColormapLayer(layer: PlanningLayer) {
   return layer.id === "safe-data-dem-3dep";
 }
 
-/** Elevation colormap is painted solid; layer opacity must not wash out DEM colors. */
 function getDrapedRasterMaterialOpacity(layer: PlanningLayer) {
-  if (isElevationColormapLayer(layer)) {
-    return 1;
-  }
-
   return layer.opacity;
 }
 
-function isOpaqueLayer(layer: PlanningLayer) {
-  if (isElevationColormapLayer(layer)) {
-    return true;
-  }
-
-  return layer.opacity >= OPAQUE_LAYER_OPACITY;
+function isFullyOpaqueLayer(layer: PlanningLayer) {
+  return layer.opacity >= FULL_LAYER_OPACITY;
 }
 
 function isFullCoverageLayer(layer: PlanningLayer, terrainGenerated: boolean) {
@@ -1197,27 +1194,9 @@ function isLayerSuppressedByAdobeStack(
     .some(
       (layer) =>
         layer.visible &&
-        isOpaqueLayer(layer) &&
+        isFullyOpaqueLayer(layer) &&
         isFullCoverageLayer(layer, terrainGenerated)
     );
-}
-
-function shouldHideTerrainSurface(layers: PlanningLayer[], terrainGenerated: boolean) {
-  const terrainIndex = getLayerPanelIndex(layers, "terrain-mesh");
-  if (terrainIndex < 0) {
-    return false;
-  }
-
-  return layers
-    .slice(0, terrainIndex)
-    .some((layer) => layer.visible && isFullCoverageLayer(layer, terrainGenerated));
-}
-
-function getLayersInCompositeOrder(layers: PlanningLayer[]) {
-  return layers
-    .map((layer, panelIndex) => ({ layer, panelIndex }))
-    .filter(({ layer }) => layer.visible)
-    .sort((a, b) => b.panelIndex - a.panelIndex);
 }
 
 function shouldDrapeRasterLayer(layer: PlanningLayer, terrainGenerated: boolean) {
@@ -1229,6 +1208,36 @@ function shouldDrapeRasterLayer(layer: PlanningLayer, terrainGenerated: boolean)
     (layer.kind === "orthophoto" || layer.id === "safe-data-dem-3dep")
   );
 }
+
+function getActiveDrapedRasterAboveTerrain(
+  layers: PlanningLayer[],
+  terrainGenerated: boolean
+) {
+  const terrainIndex = getLayerPanelIndex(layers, "terrain-mesh");
+  if (terrainIndex < 0) {
+    return null;
+  }
+
+  for (const layer of layers.slice(0, terrainIndex)) {
+    if (
+      layer.visible &&
+      shouldDrapeRasterLayer(layer, terrainGenerated) &&
+      !isLayerSuppressedByAdobeStack(layers, layer.id, terrainGenerated)
+    ) {
+      return layer;
+    }
+  }
+
+  return null;
+}
+
+function getLayersInCompositeOrder(layers: PlanningLayer[]) {
+  return layers
+    .map((layer, panelIndex) => ({ layer, panelIndex }))
+    .filter(({ layer }) => layer.visible)
+    .sort((a, b) => b.panelIndex - a.panelIndex);
+}
+
 function DrapedRasterMesh({
   georef,
   layer,
@@ -1248,8 +1257,7 @@ function DrapedRasterMesh({
 }) {
   const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
   const materialOpacity = getDrapedRasterMaterialOpacity(layer);
-  const writesDepth = getDrapedRasterDepthWrite(layer);
-  const opaque = materialOpacity >= OPAQUE_LAYER_OPACITY;
+  const fullyOpaque = materialOpacity >= FULL_LAYER_OPACITY;
   const geometry = useMemo(
     () =>
       buildDrapedRasterGeometry(
@@ -1270,15 +1278,12 @@ function DrapedRasterMesh({
     <mesh geometry={geometry} renderOrder={renderOrder}>
       <meshBasicNodeMaterial
         color={new Color("#ffffff")}
-        depthTest
-        depthWrite={writesDepth}
+        depthTest={false}
+        depthWrite={false}
         map={rasterTexture}
         opacity={materialOpacity}
-        polygonOffset={writesDepth}
-        polygonOffsetFactor={writesDepth ? -4 : 0}
-        polygonOffsetUnits={writesDepth ? -4 : 0}
         side={FrontSide}
-        transparent={!opaque}
+        transparent={!fullyOpaque}
       />
     </mesh>
   );
@@ -1364,12 +1369,12 @@ function FoundationalLayerContent({
           clippingPlanes={clippingPlanes}
           clipIntersection={false}
           color={new Color(layer.style?.fill ?? "#4aa3cf")}
-          depthTest
-          depthWrite={isOpaqueLayer(layer)}
+          depthTest={false}
+          depthWrite={false}
           map={rasterTexture ?? undefined}
           opacity={layer.opacity}
           side={FrontSide}
-          transparent={!isOpaqueLayer(layer)}
+          transparent={!isFullyOpaqueLayer(layer)}
         />
       </mesh>
     );
@@ -1501,7 +1506,14 @@ function LayeredSceneContent() {
   const orthophotoAboveTerrain =
     orthophotoLayerIndex >= 0 &&
     (terrainLayerIndex < 0 || orthophotoLayerIndex < terrainLayerIndex);
-  const hideTerrainSurface = shouldHideTerrainSurface(layers, terrainGenerated);
+  const activeDrapedRaster = useMemo(
+    () => getActiveDrapedRasterAboveTerrain(layers, terrainGenerated),
+    [layers, terrainGenerated]
+  );
+  const activeDrapedTexture = useOrthophotoTexture(
+    activeDrapedRaster?.rasterPreviewUrl ?? null
+  );
+  const hideTerrainSurface = Boolean(activeDrapedRaster && activeDrapedTexture);
   const compositeLayers = getLayersInCompositeOrder(layers);
 
   return (

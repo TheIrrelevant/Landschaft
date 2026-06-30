@@ -626,7 +626,7 @@ function createSafeDatasetLayers(
       name: dataset.label,
       kind: datasetId === "naip-ortho" ? "orthophoto" : "foundational-map",
       visible: true,
-      opacity: datasetId === "naip-ortho" ? 1 : 0.68,
+      opacity: datasetId === "naip-ortho" || datasetId === "dem-3dep" ? 1 : 0.68,
       reviewStatus: "draft",
       category: dataset.category,
       geometryType: datasetId === "naip-ortho" || datasetId === "dem-3dep"

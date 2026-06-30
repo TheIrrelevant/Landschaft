@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: use zero-centered green-blue-red diverging DEM colormap
+ * last-change: let opaque DEM suppress orthophoto rasters below in panel stack
  * ---end-metadata---
  */
 import {
@@ -25,7 +25,7 @@ import {
   BufferGeometry,
   CanvasTexture,
   Color,
-  DoubleSide,
+  DoubleSide, FrontSide,
   Float32BufferAttribute,
   RepeatWrapping,
   SRGBColorSpace,
@@ -102,8 +102,10 @@ const ONE_TO_ONE_VERTICAL_EXAGGERATION = 4.5;
 // point reads as a carved model.
 const BASE_DEPTH_METERS = 40;
 const GROUND_GRID_OFFSET = 0.08;
-const RASTER_DRAPE_LIFT = 0.04;
-const DEM_DRAPE_LIFT = 0.055;
+const RASTER_DRAPE_BASE_LIFT = 0.055;
+const LAYER_STACK_LIFT_STEP = 0.035;
+const VECTOR_OVERLAY_LIFT_BONUS = 0.08;
+const OPAQUE_LAYER_OPACITY = 0.99;
 
 /**
  * The terrain coordinate space.
@@ -744,14 +746,22 @@ function elevationToDivergingRgb(
   const green: [number, number, number] = [46, 168, 62];
   const blue: [number, number, number] = [42, 104, 220];
   const red: [number, number, number] = [220, 58, 42];
+  const span = Math.max(maxElevation - minElevation, 0.0001);
 
-  if (elevation >= 0) {
-    const maxPositive = Math.max(maxElevation, 0.0001);
-    return lerpRgb(green, red, elevation / maxPositive);
+  if (minElevation < 0 && maxElevation > 0) {
+    if (elevation >= 0) {
+      return lerpRgb(green, red, elevation / Math.max(maxElevation, 0.0001));
+    }
+
+    return lerpRgb(green, blue, elevation / Math.min(minElevation, -0.0001));
   }
 
-  const minNegative = Math.min(minElevation, -0.0001);
-  return lerpRgb(green, blue, elevation / minNegative);
+  const tone = Math.min(Math.max((elevation - minElevation) / span, 0), 1);
+  if (maxElevation <= 0) {
+    return lerpRgb(blue, green, tone);
+  }
+
+  return lerpRgb(green, red, tone);
 }
 
 async function loadGeoTiffScalarTexture(url: string) {
@@ -838,9 +848,11 @@ function normalizeRasterTone(value: number, min: number, max: number) {
 }
 
 function TerrainMesh({
+  hideTopSurface,
   terrain,
   space
 }: {
+  hideTopSurface: boolean;
   terrain: TerrainModel;
   space: TerrainSpace;
 }) {
@@ -849,7 +861,10 @@ function TerrainMesh({
     const topSurface = new THREE.MeshLambertNodeMaterial({
       color: new Color(TERRAIN_CLAY),
       map: createFeltTexture(),
-      side: DoubleSide
+      side: DoubleSide,
+      transparent: hideTopSurface,
+      opacity: hideTopSurface ? 0 : 1,
+      depthWrite: !hideTopSurface
     });
     const solid = new THREE.MeshLambertNodeMaterial({
       color: new Color(SOLID_TERRAIN_COLOR),
@@ -857,7 +872,7 @@ function TerrainMesh({
       side: DoubleSide
     });
     return [topSurface, solid];
-  }, []);
+  }, [hideTopSurface]);
 
   return <mesh castShadow geometry={geometry} material={materials} />;
 }
@@ -987,16 +1002,18 @@ function GroundPlane({ baseY }: { baseY: number }) {
 }
 
 function TerrainLayerContent({
+  hideTopSurface,
   space,
   terrain
 }: {
+  hideTopSurface: boolean;
   space: TerrainSpace;
   terrain: TerrainModel;
 }) {
   return (
     <>
-      <TerrainMesh terrain={terrain} space={space} />
-      <ContourLines terrain={terrain} space={space} />
+      <TerrainMesh hideTopSurface={hideTopSurface} terrain={terrain} space={space} />
+      {hideTopSurface ? null : <ContourLines terrain={terrain} space={space} />}
     </>
   );
 }
@@ -1088,6 +1105,121 @@ function getRasterScenePlacement(
 }
 
 
+
+function getLayerPanelIndex(layers: PlanningLayer[], layerId: string) {
+  return layers.findIndex((layer) => layer.id === layerId);
+}
+
+/** Photoshop-style stack: panel row 0 is the front / top composite layer. */
+function getLayerRenderOrder(layers: PlanningLayer[], layerId: string) {
+  const panelIndex = getLayerPanelIndex(layers, layerId);
+  if (panelIndex < 0) {
+    return 1;
+  }
+
+  return layers.length - panelIndex + 2;
+}
+
+function getLayerStackLift(layers: PlanningLayer[], layerId: string) {
+  const panelIndex = getLayerPanelIndex(layers, layerId);
+  if (panelIndex < 0) {
+    return RASTER_DRAPE_BASE_LIFT;
+  }
+
+  const distanceFromBottom = layers.length - 1 - panelIndex;
+  return RASTER_DRAPE_BASE_LIFT + distanceFromBottom * LAYER_STACK_LIFT_STEP;
+}
+
+function getVectorLayerLift(layers: PlanningLayer[], layerId: string) {
+  return getLayerStackLift(layers, layerId) + VECTOR_OVERLAY_LIFT_BONUS;
+}
+
+function getDrapedRasterDepthWrite(layer: PlanningLayer) {
+  if (isElevationColormapLayer(layer)) {
+    return false;
+  }
+
+  return getDrapedRasterMaterialOpacity(layer) >= OPAQUE_LAYER_OPACITY;
+}
+
+function isElevationColormapLayer(layer: PlanningLayer) {
+  return layer.id === "safe-data-dem-3dep";
+}
+
+/** Elevation colormap is painted solid; layer opacity must not wash out DEM colors. */
+function getDrapedRasterMaterialOpacity(layer: PlanningLayer) {
+  if (isElevationColormapLayer(layer)) {
+    return 1;
+  }
+
+  return layer.opacity;
+}
+
+function isOpaqueLayer(layer: PlanningLayer) {
+  if (isElevationColormapLayer(layer)) {
+    return true;
+  }
+
+  return layer.opacity >= OPAQUE_LAYER_OPACITY;
+}
+
+function isFullCoverageLayer(layer: PlanningLayer, terrainGenerated: boolean) {
+  if (!layer.visible || layer.geometryType !== "raster" || !layer.rasterPreviewUrl) {
+    return false;
+  }
+
+  return (
+    (terrainGenerated &&
+      Boolean(layer.rasterGeoreference) &&
+      (layer.kind === "orthophoto" || layer.id === "safe-data-dem-3dep")) ||
+    Boolean(layer.rasterGeoreference)
+  );
+}
+
+/** Photoshop Normal: any opaque full-coverage raster above hides raster layers below it. */
+function isLayerSuppressedByAdobeStack(
+  layers: PlanningLayer[],
+  layerId: string,
+  terrainGenerated: boolean
+) {
+  const targetLayer = layers.find((layer) => layer.id === layerId);
+  if (!targetLayer || targetLayer.geometryType !== "raster") {
+    return false;
+  }
+
+  const panelIndex = getLayerPanelIndex(layers, layerId);
+  if (panelIndex < 0) {
+    return false;
+  }
+
+  return layers
+    .slice(0, panelIndex)
+    .some(
+      (layer) =>
+        layer.visible &&
+        isOpaqueLayer(layer) &&
+        isFullCoverageLayer(layer, terrainGenerated)
+    );
+}
+
+function shouldHideTerrainSurface(layers: PlanningLayer[], terrainGenerated: boolean) {
+  const terrainIndex = getLayerPanelIndex(layers, "terrain-mesh");
+  if (terrainIndex < 0) {
+    return false;
+  }
+
+  return layers
+    .slice(0, terrainIndex)
+    .some((layer) => layer.visible && isFullCoverageLayer(layer, terrainGenerated));
+}
+
+function getLayersInCompositeOrder(layers: PlanningLayer[]) {
+  return layers
+    .map((layer, panelIndex) => ({ layer, panelIndex }))
+    .filter(({ layer }) => layer.visible)
+    .sort((a, b) => b.panelIndex - a.panelIndex);
+}
+
 function shouldDrapeRasterLayer(layer: PlanningLayer, terrainGenerated: boolean) {
   return (
     terrainGenerated &&
@@ -1097,16 +1229,12 @@ function shouldDrapeRasterLayer(layer: PlanningLayer, terrainGenerated: boolean)
     (layer.kind === "orthophoto" || layer.id === "safe-data-dem-3dep")
   );
 }
-
-function getDrapeLift(layer: PlanningLayer) {
-  return layer.id === "safe-data-dem-3dep" ? DEM_DRAPE_LIFT : RASTER_DRAPE_LIFT;
-}
-
 function DrapedRasterMesh({
   georef,
   layer,
   project,
   renderOrder,
+  stackLift,
   terrain,
   terrainSpace
 }: {
@@ -1114,10 +1242,14 @@ function DrapedRasterMesh({
   layer: PlanningLayer;
   project: ProjectMetadata;
   renderOrder: number;
+  stackLift: number;
   terrain: TerrainModel;
   terrainSpace: TerrainSpace;
 }) {
   const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
+  const materialOpacity = getDrapedRasterMaterialOpacity(layer);
+  const writesDepth = getDrapedRasterDepthWrite(layer);
+  const opaque = materialOpacity >= OPAQUE_LAYER_OPACITY;
   const geometry = useMemo(
     () =>
       buildDrapedRasterGeometry(
@@ -1125,9 +1257,9 @@ function DrapedRasterMesh({
         terrainSpace,
         project,
         georef,
-        getDrapeLift(layer)
+        stackLift
       ),
-    [terrain, terrainSpace, project, georef, layer.id]
+    [terrain, terrainSpace, project, georef, stackLift]
   );
 
   if (!rasterTexture) {
@@ -1138,11 +1270,15 @@ function DrapedRasterMesh({
     <mesh geometry={geometry} renderOrder={renderOrder}>
       <meshBasicNodeMaterial
         color={new Color("#ffffff")}
-        depthWrite={false}
+        depthTest
+        depthWrite={writesDepth}
         map={rasterTexture}
-        opacity={layer.opacity}
-        side={DoubleSide}
-        transparent
+        opacity={materialOpacity}
+        polygonOffset={writesDepth}
+        polygonOffsetFactor={writesDepth ? -4 : 0}
+        polygonOffsetUnits={writesDepth ? -4 : 0}
+        side={FrontSide}
+        transparent={!opaque}
       />
     </mesh>
   );
@@ -1150,19 +1286,28 @@ function DrapedRasterMesh({
 
 function FoundationalLayerContent({
   layer,
-  renderOrder,
+  layers,
   terrain,
   terrainGenerated,
   terrainSpace,
   viewScaleMode
 }: {
   layer: PlanningLayer;
-  renderOrder: number;
+  layers: PlanningLayer[];
   terrain: TerrainModel;
   terrainGenerated: boolean;
   terrainSpace: TerrainSpace;
   viewScaleMode: "fit" | "1:1";
 }) {
+  if (!layer.visible) {
+    return null;
+  }
+
+  if (isLayerSuppressedByAdobeStack(layers, layer.id, terrainGenerated)) {
+    return null;
+  }
+
+  const renderOrder = getLayerRenderOrder(layers, layer.id);
   const project = useEditorStore((state) => state.project);
   const selectFeatureInLayer = useEditorStore((state) => state.selectFeatureInLayer);
   const projectSpace = useMemo(
@@ -1170,7 +1315,11 @@ function FoundationalLayerContent({
     [project, viewScaleMode]
   );
   const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
-  const lift = 0.08 + renderOrder * 0.018;
+  const stackLift = getLayerStackLift(layers, layer.id);
+  const lift =
+    layer.geometryType === "line" || layer.geometryType === "mixed"
+      ? getVectorLayerLift(layers, layer.id)
+      : stackLift;
   const clippingPlanes = useMemo(
     () =>
       layer.id === "project-boundary"
@@ -1187,6 +1336,7 @@ function FoundationalLayerContent({
           layer={layer}
           project={project}
           renderOrder={renderOrder}
+          stackLift={stackLift}
           terrain={terrain}
           terrainSpace={terrainSpace}
         />
@@ -1214,10 +1364,12 @@ function FoundationalLayerContent({
           clippingPlanes={clippingPlanes}
           clipIntersection={false}
           color={new Color(layer.style?.fill ?? "#4aa3cf")}
-          depthWrite={false}
+          depthTest
+          depthWrite={isOpaqueLayer(layer)}
           map={rasterTexture ?? undefined}
           opacity={layer.opacity}
-          transparent
+          side={FrontSide}
+          transparent={!isOpaqueLayer(layer)}
         />
       </mesh>
     );
@@ -1238,6 +1390,7 @@ function FoundationalLayerContent({
           lift={lift}
           project={project}
           projectSpace={projectSpace}
+          renderOrder={renderOrder}
           selectFeatureInLayer={selectFeatureInLayer}
           terrain={terrain}
           terrainGenerated={terrainGenerated}
@@ -1255,6 +1408,7 @@ function FeatureOverlay({
   lift,
   project,
   projectSpace,
+  renderOrder,
   selectFeatureInLayer,
   terrain,
   terrainGenerated,
@@ -1266,6 +1420,7 @@ function FeatureOverlay({
   lift: number;
   project: ProjectMetadata;
   projectSpace: ProjectSpace;
+  renderOrder: number;
   selectFeatureInLayer: (layerId: string, featureId: string) => void;
   terrain: TerrainModel;
   terrainGenerated: boolean;
@@ -1293,6 +1448,7 @@ function FeatureOverlay({
   return (
     <lineSegments
       geometry={geometry}
+      renderOrder={renderOrder}
       onClick={(event) => {
         event.stopPropagation();
         selectFeatureInLayer(layer.id, feature.id);
@@ -1312,6 +1468,7 @@ function FeatureOverlay({
         clippingPlanes={clippingPlanes}
         clipIntersection={false}
         color={layer.style?.stroke ?? "#2f6f4e"}
+        depthTest={false}
         depthWrite={false}
         linewidth={layer.style?.strokeWidth ?? 2}
         opacity={layer.opacity}
@@ -1344,21 +1501,19 @@ function LayeredSceneContent() {
   const orthophotoAboveTerrain =
     orthophotoLayerIndex >= 0 &&
     (terrainLayerIndex < 0 || orthophotoLayerIndex < terrainLayerIndex);
-  const visibleLayersFromBottom = layers
-    .map((layer) => ({ layer }))
-    .filter(({ layer }) => layer.visible)
-    .reverse();
+  const hideTerrainSurface = shouldHideTerrainSurface(layers, terrainGenerated);
+  const compositeLayers = getLayersInCompositeOrder(layers);
 
   return (
     <>
       {!terrainGenerated ? <GroundPlane baseY={-0.12} /> : null}
-      {visibleLayersFromBottom.map(({ layer }, renderIndex) => {
+      {compositeLayers.map(({ layer }) => {
         if (layer.id === "orthophoto-base") {
           return (
             <OrthophotoLayerContent
               forceOverlay={orthophotoAboveTerrain}
               key={layer.id}
-              renderOrder={renderIndex + 1}
+              renderOrder={getLayerRenderOrder(layers, layer.id)}
             />
           );
         }
@@ -1366,6 +1521,7 @@ function LayeredSceneContent() {
         if (layer.id === "terrain-mesh" && terrainGenerated) {
           return (
             <TerrainLayerContent
+              hideTopSurface={hideTerrainSurface}
               key={layer.id}
               space={terrainSpace}
               terrain={terrain}
@@ -1382,7 +1538,7 @@ function LayeredSceneContent() {
             <FoundationalLayerContent
               key={layer.id}
               layer={layer}
-              renderOrder={renderIndex + 2}
+              layers={layers}
               terrain={terrain}
               terrainGenerated={terrainGenerated}
               terrainSpace={terrainSpace}

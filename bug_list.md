@@ -3,20 +3,20 @@ type: bug-tracker
 description: Known visual and functional bugs deferred for later fixes in Landschaft.
 last-updated: 2026-06-30
 last-model: amelia(composer)
-last-change: log 3DEP DEM floating sheet issue and draped render fix
+last-change: add panel-order raster masking fix for BUG-001
 ---
 
 # Bug List
 
 ## Open
 
-### BUG-001 — NAIP orthophoto draped mesh overlaps terrain surface (material conflict)
+### BUG-001 — Upper layers do not mask lower layers (stack compositing)
 
-- **Status:** Open (deferred)
-- **Area:** `apps/web/src/scene/TerrainScene.tsx` — `DrapedRasterMesh` + `TerrainMesh`
-- **Symptom:** When NAIP orthophoto is draped on the 3D terrain, the orthophoto texture plane and the terrain mesh top surface occupy nearly the same depth. This causes material conflict / z-fighting and visible grainy or flickering artifacts on slopes and flat areas.
-- **Current behavior:** NAIP imagery loads and aligns well overall; the overlap artifact is cosmetic for now and not blocking import.
-- **Likely fix direction:** Raise draped orthophoto slightly above the terrain surface, disable terrain top shading under orthophoto, or project NAIP directly onto the terrain mesh material instead of rendering a second draped mesh.
+- **Status:** Open (Adobe-style compositing applied — verify in browser)
+- **Area:** `apps/web/src/scene/TerrainScene.tsx` — `LayeredSceneContent`, `DrapedRasterMesh`, overlay materials
+- **Symptom:** Layers listed above in the panel still show content from layers below (terrain clay grain through NAIP, DEM through NAIP, etc.).
+- **Root cause:** Overlay meshes used fixed per-dataset lift (`NAIP=0.04`, `DEM=0.055`) instead of panel stack order, and all overlays used `depthWrite={false}` so nothing occluded the depth buffer.
+- **Fix direction (2026-06-30):** Photoshop Normal blend: composite bottom-to-top by panel index; 100% opaque full-coverage rasters suppress layers below; semi-transparent layers alpha-blend without double-sided depth bleed.
 - **Reported:** 2026-06-30
 
 ### BUG-002 — 3DEP DEM used to render as floating flat sheet above terrain

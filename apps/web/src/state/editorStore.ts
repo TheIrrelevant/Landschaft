@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: add safe dataset location selection and queued provider imports
+ * last-change: make safe dataset bridge URL configurable
  * ---end-metadata---
  */
 import {
@@ -45,6 +45,8 @@ type SafeDatasetId =
   | "hydrography"
   | "transportation";
 type SafeDatasetImportStatus = "idle" | "ready" | "importing" | "complete" | "error";
+const safeDatasetBridgeUrl =
+  import.meta.env.VITE_LANDSCHAFT_MCP_HTTP_URL ?? "http://127.0.0.1:8787";
 
 interface SafeDatasetLocation {
   id: string;
@@ -1746,17 +1748,26 @@ async function fetchSafeDatasetImport(
   locationId: string,
   datasetIds: SafeDatasetId[]
 ): Promise<SafeDatasetBackendImportResult> {
-  const response = await fetch("http://127.0.0.1:8787/safe-dataset/import", {
-    body: JSON.stringify({
-      locationId,
-      datasetIds,
-      persistAssets: true
-    }),
-    headers: {
-      "content-type": "application/json"
-    },
-    method: "POST"
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${safeDatasetBridgeUrl}/safe-dataset/import`, {
+      body: JSON.stringify({
+        locationId,
+        datasetIds,
+        persistAssets: true
+      }),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "POST"
+    });
+  } catch (error) {
+    throw new Error(
+      `Safe dataset backend is unavailable at ${safeDatasetBridgeUrl}. Start the MCP server with npm run dev:mcp or set VITE_LANDSCHAFT_MCP_HTTP_URL.`,
+      { cause: error }
+    );
+  }
 
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as

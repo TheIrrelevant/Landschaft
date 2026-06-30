@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: render MCP-imported GeoTIFF provider raster layers
+ * last-change: keep shadowMaterial disabled to avoid terrain base blink
  * ---end-metadata---
  */
 import {
@@ -100,6 +100,7 @@ const ONE_TO_ONE_VERTICAL_EXAGGERATION = 4.5;
 // displayScale into the scene). ~40 m of "geological block" under the lowest
 // point reads as a carved model.
 const BASE_DEPTH_METERS = 40;
+const GROUND_GRID_OFFSET = 0.08;
 
 /**
  * The terrain coordinate space.
@@ -278,13 +279,17 @@ function buildTerrainGeometry(terrain: TerrainModel, space: TerrainSpace) {
     tri(tA, bB, tB, wallTop, wallBot, wallTop);
   }
 
-  // Base cap at baseY — faces down.
-  const c00 = bottom(0, 0);
-  const c10 = bottom(last, 0);
-  const c11 = bottom(last, last);
-  const c01 = bottom(0, last);
-  tri(c00, c10, c11, wallBot, wallBot, wallBot);
-  tri(c00, c11, c01, wallBot, wallBot, wallBot);
+  // Bottom cap: single downward-facing surface at baseY (replaces separate TerrainBaseCap plane).
+  for (let gy = 0; gy < last; gy += 1) {
+    for (let gx = 0; gx < last; gx += 1) {
+      const bA = bottom(gx, gy);
+      const bB = bottom(gx + 1, gy);
+      const bC = bottom(gx + 1, gy + 1);
+      const bD = bottom(gx, gy + 1);
+      tri(bA, bC, bB, gridUv(gx, gy), gridUv(gx + 1, gy + 1), gridUv(gx + 1, gy));
+      tri(bA, bD, bC, gridUv(gx, gy), gridUv(gx, gy + 1), gridUv(gx + 1, gy + 1));
+    }
+  }
 
   const geometry = new BufferGeometry();
   geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
@@ -708,9 +713,7 @@ function TerrainMesh({
     return [topSurface, solid];
   }, []);
 
-  return (
-    <mesh castShadow geometry={geometry} material={materials} receiveShadow />
-  );
+  return <mesh castShadow geometry={geometry} material={materials} />;
 }
 
 function OrthophotoBaseMap({
@@ -828,14 +831,10 @@ function GroundPlane({ baseY }: { baseY: number }) {
   const gridMap = useMemo(() => createCrosshairGroundTexture(), []);
 
   return (
-    <group position={[0, baseY - 0.01, 0]}>
+    <group position={[0, baseY - GROUND_GRID_OFFSET, 0]}>
       <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[GROUND_PLANE_SIZE, GROUND_PLANE_SIZE]} />
         <meshBasicNodeMaterial color={new Color(GROUND_COLOR)} map={gridMap} />
-      </mesh>
-      <mesh position={[0, 0.005, 0]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[GROUND_PLANE_SIZE, GROUND_PLANE_SIZE]} />
-        <shadowMaterial opacity={0.22} transparent />
       </mesh>
     </group>
   );
@@ -1132,7 +1131,7 @@ function LayeredSceneContent() {
 
   return (
     <>
-      <GroundPlane baseY={terrainGenerated ? terrainSpace.baseY : -0.12} />
+      {!terrainGenerated ? <GroundPlane baseY={-0.12} /> : null}
       {visibleLayersFromBottom.map(({ layer }, renderIndex) => {
         if (layer.id === "orthophoto-base") {
           return (

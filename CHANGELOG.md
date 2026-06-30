@@ -1,15 +1,18 @@
 ---
 type: changelog
 description: Release history for the Landschaft landscape planning editor.
-last-updated: 2026-06-28
+last-updated: 2026-06-30
 last-model: codex-gpt-5
-last-change: log GeoTIFF raster import support
+last-change: log safe dataset bridge hardening
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Made the safe dataset HTTP bridge URL configurable through `VITE_LANDSCHAFT_MCP_HTTP_URL`.
+- Kept the MCP stdio server alive when the optional local HTTP bridge port is already in use.
+- Georeferenced MCP-imported provider rasters from ImageServer export extents instead of blindly fitting them to the full project.
 - Added MCP safe dataset search, manifest, and import tools backed by USGS TNMAccess, NAIP and 3DEP ImageServer clipped TIFF exports, and contour services.
 - Persisted MCP-imported NAIP and 3DEP clipped TIFF exports into web-served provider assets.
 - Connected the web safe-location import flow to the MCP HTTP bridge and render provider GeoTIFF raster layers in the scene.

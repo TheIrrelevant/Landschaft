@@ -3,7 +3,7 @@
  * description: MCP server exposing Landschaft planning editor terrain and map tools.
  * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: expose safe dataset tools through MCP and a local HTTP bridge
+ * last-change: keep MCP stdio alive when the optional HTTP bridge port is busy
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
@@ -359,6 +359,21 @@ function startHttpBridge() {
         500
       );
     }
+  });
+
+  httpServer.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EADDRINUSE") {
+      console.error(
+        `Landschaft MCP HTTP bridge skipped: 127.0.0.1:${httpPort} is already in use.`
+      );
+      return;
+    }
+
+    console.error(
+      `Landschaft MCP HTTP bridge failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   });
 
   httpServer.listen(httpPort, "127.0.0.1");

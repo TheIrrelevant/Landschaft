@@ -4,17 +4,18 @@
  * description: MCP handlers for USA safe-location dataset discovery and import.
  * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: persist clipped provider raster exports as web-served assets
+ * last-change: download provider rasters via ImageServer f=image instead of broken TIFF hrefs
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
-  createProjectFitRasterGeoreference,
   generateTerrainProjectAsync,
+  getExtentMeters,
   type OrthophotoCorner,
   type PlanningLayer,
   type ProjectMetadata,
+  type RasterGeoreference,
   type TerrainGenerationRequest,
   type VectorFeature
 } from "@landschaft/shared";
@@ -83,6 +84,7 @@ interface PersistedRasterAsset {
   bytes: number;
   width: number;
   height: number;
+  rasterGeoreference: RasterGeoreference;
 }
 
 interface ArcGisPoint {
@@ -253,39 +255,53 @@ function normalizeDatasetIds(location: SafeDatasetLocation, datasetIds?: SafeDat
   return requested.filter((datasetId) => location.datasets.includes(datasetId));
 }
 
-async function getDatasetManifestSource(
-  location: SafeDatasetLocation,
-  datasetId: SafeDatasetId
-) {
+function getRasterExportOptions(datasetId: SafeDatasetId) {
   if (datasetId === "naip-ortho") {
     return {
-      datasetId,
-      label: datasetLabels[datasetId],
-      provider: "USGS NAIP ImageServer",
-      export: await fetchRasterExport(location, {
-        serviceUrl:
-          "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage",
-        pixelType: "U8",
-        size: "1536,1536",
-        interpolation: "RSP_NearestNeighbor"
-      })
+      serviceUrl:
+        "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage",
+      pixelType: "U8",
+      size: "1536,1536",
+      interpolation: "RSP_NearestNeighbor"
     };
   }
 
   if (datasetId === "dem-3dep") {
+    return {
+      serviceUrl:
+        "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
+      pixelType: "F32",
+      size: "1024,1024",
+      interpolation: "RSP_BilinearInterpolation",
+      noData: "-9999"
+    };
+  }
+
+  return null;
+}
+
+async function getDatasetManifestSource(
+  location: SafeDatasetLocation,
+  datasetId: SafeDatasetId
+) {
+  const rasterExportOptions = getRasterExportOptions(datasetId);
+
+  if (datasetId === "naip-ortho" && rasterExportOptions) {
+    return {
+      datasetId,
+      label: datasetLabels[datasetId],
+      provider: "USGS NAIP ImageServer",
+      export: await fetchRasterExport(location, rasterExportOptions)
+    };
+  }
+
+  if (datasetId === "dem-3dep" && rasterExportOptions) {
     const products = await fetchTnmProducts(location, datasetId);
     return {
       datasetId,
       label: datasetLabels[datasetId],
       provider: "USGS 3DEP ImageServer / TNMAccess",
-      export: await fetchRasterExport(location, {
-        serviceUrl:
-          "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
-        pixelType: "F32",
-        size: "1024,1024",
-        interpolation: "RSP_BilinearInterpolation",
-        noData: "-9999"
-      }),
+      export: await fetchRasterExport(location, rasterExportOptions),
       total: products.total ?? 0,
       products: (products.items ?? []).slice(0, 8).map(summarizeTnmProduct)
     };
@@ -311,18 +327,21 @@ async function getDatasetManifestSource(
   };
 }
 
-async function fetchRasterExport(
+type RasterExportOptions = {
+  serviceUrl: string;
+  pixelType: string;
+  size: string;
+  interpolation: string;
+  noData?: string;
+};
+
+function buildRasterExportUrl(
   location: SafeDatasetLocation,
-  options: {
-    serviceUrl: string;
-    pixelType: string;
-    size: string;
-    interpolation: string;
-    noData?: string;
-  }
+  options: RasterExportOptions,
+  responseFormat: "json" | "image"
 ) {
   const url = new URL(options.serviceUrl);
-  url.searchParams.set("f", "json");
+  url.searchParams.set("f", responseFormat);
   url.searchParams.set("bbox", bboxString(location));
   url.searchParams.set("bboxSR", "4326");
   url.searchParams.set("imageSR", "4326");
@@ -332,7 +351,14 @@ async function fetchRasterExport(
   url.searchParams.set("noData", options.noData ?? "0");
   url.searchParams.set("interpolation", options.interpolation);
 
-  return fetchJson<RasterExportResponse>(url);
+  return url;
+}
+
+async function fetchRasterExport(
+  location: SafeDatasetLocation,
+  options: RasterExportOptions
+) {
+  return fetchJson<RasterExportResponse>(buildRasterExportUrl(location, options, "json"));
 }
 
 async function fetchTnmProducts(location: SafeDatasetLocation, datasetId: SafeDatasetId) {
@@ -469,11 +495,7 @@ function createSourceReferenceLayer(
     ...(isRaster
       ? {
           rasterPreviewUrl: asset?.publicPath,
-          rasterGeoreference: createProjectFitRasterGeoreference(
-            project,
-            asset?.width ?? 1,
-            asset?.height ?? 1
-          )
+          rasterGeoreference: asset?.rasterGeoreference
         }
       : {}),
     planningImpactNotes: [
@@ -515,7 +537,12 @@ async function persistRasterAssets(
       location.id,
       `${source.datasetId}.tif`
     );
-    await downloadFile(href, localPath);
+    const rasterExportOptions = getRasterExportOptions(source.datasetId);
+    if (!rasterExportOptions) {
+      continue;
+    }
+
+    await downloadRasterExport(location, rasterExportOptions, localPath);
     const stats = await stat(localPath);
     assets.push({
       datasetId: source.datasetId,
@@ -524,21 +551,40 @@ async function persistRasterAssets(
       publicPath,
       bytes: stats.size,
       width: source.export?.width ?? 1,
-      height: source.export?.height ?? 1
+      height: source.export?.height ?? 1,
+      rasterGeoreference: createRasterGeoreferenceFromExport(
+        location,
+        source.export,
+        source.export?.width ?? 1,
+        source.export?.height ?? 1
+      )
     });
   }
 
   return assets;
 }
 
-async function downloadFile(url: string, localPath: string) {
+async function downloadRasterExport(
+  location: SafeDatasetLocation,
+  options: RasterExportOptions,
+  localPath: string
+) {
   await mkdir(dirname(localPath), { recursive: true });
-  const response = await fetch(url);
-  if (!response.ok || !response.body) {
-    throw new Error(`Provider asset download failed: ${response.status}`);
-  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
 
-  await writeFile(localPath, Buffer.from(await response.arrayBuffer()));
+  try {
+    const response = await fetch(buildRasterExportUrl(location, options, "image"), {
+      signal: controller.signal
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`Provider asset download failed: ${response.status}`);
+    }
+
+    await writeFile(localPath, Buffer.from(await response.arrayBuffer()));
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function findRepoRoot() {
@@ -564,6 +610,41 @@ async function findRepoRoot() {
   }
 
   throw new Error("Could not locate Landschaft workspace root.");
+}
+
+function createRasterGeoreferenceFromExport(
+  location: SafeDatasetLocation,
+  rasterExport: RasterExportResponse | undefined,
+  imageWidthPixels: number,
+  imageHeightPixels: number
+): RasterGeoreference {
+  const extent = rasterExport?.extent ?? {
+    xmin: location.bbox.west,
+    ymin: location.bbox.south,
+    xmax: location.bbox.east,
+    ymax: location.bbox.north
+  };
+  const corners = getCornersFromLocation(location);
+  const projectLike = {
+    corners,
+    realWorldExtentMeters: getExtentMeters(corners)
+  };
+  const projectMin = mapCoordinateToProject([extent.xmin, extent.ymin], projectLike);
+  const projectMax = mapCoordinateToProject([extent.xmax, extent.ymax], projectLike);
+
+  return {
+    projectMin: [
+      Math.min(projectMin[0], projectMax[0]),
+      Math.min(projectMin[1], projectMax[1])
+    ],
+    projectMax: [
+      Math.max(projectMin[0], projectMax[0]),
+      Math.max(projectMin[1], projectMax[1])
+    ],
+    imageWidthPixels,
+    imageHeightPixels,
+    parsedFrom: "geotiff"
+  };
 }
 
 function contourFeatureToVectorFeatures(
@@ -627,7 +708,7 @@ function getCornersFromLocation(location: SafeDatasetLocation): OrthophotoCorner
 
 function mapCoordinateToProject(
   mapCoordinate: [number, number],
-  project: ProjectMetadata
+  project: Pick<ProjectMetadata, "corners" | "realWorldExtentMeters">
 ): [number, number] {
   const longitudes = project.corners.map((corner) => corner.longitude);
   const latitudes = project.corners.map((corner) => corner.latitude);

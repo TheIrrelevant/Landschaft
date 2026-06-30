@@ -1,9 +1,9 @@
 ---
 type: readme
 description: Technical entrypoint for the Landschaft web editor and MCP server.
-last-updated: 2026-06-24
+last-updated: 2026-06-30
 last-model: codex-gpt-5
-last-change: added initial project setup documentation
+last-change: document safe dataset MCP bridge configuration
 ---
 
 # Landschaft
@@ -38,12 +38,22 @@ npm run typecheck
 npm run build
 ```
 
+The web editor calls the local MCP HTTP bridge at `http://127.0.0.1:8787` by default for safe dataset imports. Override it for alternate dev ports or remote bridge hosts:
+
+```bash
+VITE_LANDSCHAFT_MCP_HTTP_URL=http://127.0.0.1:8788 npm run dev
+LANDSCHAFT_MCP_HTTP_PORT=8788 npm run dev:mcp
+```
+
 ## MCP Tools
 
 The initial MCP server exposes:
 
+- `safe_dataset_search`: searches curated provider-backed safe locations.
+- `safe_dataset_manifest`: fetches live provider manifests for selected datasets.
+- `safe_dataset_import`: imports safe location terrain, provider layers, and optional raster assets.
 - `map_read`: returns structured vector evidence for LLM analysis.
 - `map_write_draft`: writes draft planning features back into the project model.
 - `start_planning_workflow`: starts an area-focused planning workflow for a coded LCA area.
 
-The current MCP implementation is a scaffold. It returns deterministic sample data until the project database and editor state API are added.
+The MCP server also starts an optional local HTTP bridge for the web editor. If that port is already in use, stdio MCP tools continue to run and the bridge logs a warning instead of terminating the server.

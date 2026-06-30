@@ -3,28 +3,29 @@ type: bug-tracker
 description: Known visual and functional bugs deferred for later fixes in Landschaft.
 last-updated: 2026-06-30
 last-model: amelia(composer)
-last-change: document layer toggle terrain hole fix
+last-change: close BUG-001 and BUG-002 after user verification
 ---
 
 # Bug List
 
 ## Open
 
+_None._
+
+## Fixed
+
 ### BUG-001 — Upper layers do not mask lower layers (stack compositing)
 
-- **Status:** Open (Adobe-style compositing applied — verify in browser)
+- **Status:** Fixed (verified 2026-06-30)
 - **Area:** `apps/web/src/scene/TerrainScene.tsx` — `LayeredSceneContent`, `DrapedRasterMesh`, overlay materials
-- **Symptom:** Layers listed above in the panel still show content from layers below (terrain clay grain through NAIP, DEM through NAIP, etc.).
-- **Root cause:** Overlay meshes used fixed per-dataset lift (`NAIP=0.04`, `DEM=0.055`) instead of panel stack order, and all overlays used `depthWrite={false}` so nothing occluded the depth buffer.
-- **Fix direction (2026-06-30):** Photoshop Normal blend: composite bottom-to-top by panel index; 100% opaque full-coverage rasters suppress layers below; semi-transparent layers alpha-blend without double-sided depth bleed.
-- **Layer toggle hole (2026-06-30):** `shouldHideTerrainSurface` hid terrain clay while suppressed rasters remounted and reloaded textures async, leaving a grey ground patch. Fix: always render terrain top; cache draped raster textures by URL.
+- **Symptom:** Layers listed above in the panel still showed content from layers below; toggling visibility left grey ground holes.
+- **Fix:** Panel-order stack compositing, draped raster texture cache, terrain hide only when overlay texture is ready, depth-test-free draped compositing, and working 0–100 per-layer opacity (`8d96fc0`).
 - **Reported:** 2026-06-30
 
 ### BUG-002 — 3DEP DEM used to render as floating flat sheet above terrain
 
-- **Status:** Open (partially addressed)
+- **Status:** Fixed (verified 2026-06-30)
 - **Area:** `apps/web/src/scene/TerrainScene.tsx` — provider DEM raster rendering
 - **Symptom:** 3DEP DEM appeared as a semi-transparent tan plane hovering above the terrain mesh instead of following surface relief.
-- **Fix applied:** Drape DEM raster on terrain with elevation colormap (2026-06-30).
-- **Remaining risk:** Same material overlap artifacts as BUG-001 may still appear until terrain and draped raster share one surface path.
+- **Fix:** DEM draped on terrain with elevation colormap; stack compositing and opacity fixes from BUG-001 resolved remaining overlap artifacts.
 - **Reported:** 2026-06-30

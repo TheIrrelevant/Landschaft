@@ -1619,17 +1619,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       saveProjectSnapshot(toProjectSnapshot(nextState));
       set(nextState);
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Safe dataset import failed.";
       set({
         terrainGenerating: false,
-        terrainGenerationError:
-          error instanceof Error
-            ? error.message
-            : "Safe dataset import failed.",
+        terrainGenerationError: null,
         safeDatasetImportStatus: "error",
-        safeDatasetImportMessage:
-          error instanceof Error
-            ? error.message
-            : "Safe dataset import failed."
+        safeDatasetImportMessage: message
       });
     }
   },

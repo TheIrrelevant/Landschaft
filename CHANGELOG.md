@@ -3,13 +3,19 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-30
 last-model: codex-gpt-5
-last-change: log safe dataset bridge hardening
+last-change: log transportation pagination and import reliability fixes
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Paginated USGS National Map transportation import so local roads and trails are no longer capped at preview limits (Boulder AOI now imports the full road network).
+- Increased MCP provider JSON and raster download timeouts and surfaced clearer timeout errors instead of generic aborted fetch messages.
+- Strengthened Open-Meteo elevation retry/backoff during safe dataset terrain generation.
+- Prefer USGS contour terrain during safe dataset import when the contours dataset is selected.
+- Show safe dataset import failures once in the setup panel instead of duplicating the same error message.
+- Closed BUG-001 and BUG-002 in `bug_list.md` after user verification.
 - Made the safe dataset HTTP bridge URL configurable through `VITE_LANDSCHAFT_MCP_HTTP_URL`.
 - Kept the MCP stdio server alive when the optional local HTTP bridge port is already in use.
 - Georeferenced MCP-imported provider rasters from ImageServer export extents instead of blindly fitting them to the full project.

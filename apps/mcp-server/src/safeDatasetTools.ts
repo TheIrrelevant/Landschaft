@@ -4,7 +4,7 @@
  * description: MCP handlers for USA safe-location dataset discovery and import.
  * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: import National Map transportation vectors for roads highways and trails
+ * last-change: paginate transportation import so local roads and trails are not capped
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -136,15 +136,19 @@ interface TransportResponse {
 }
 
 const transportLayerConfig = [
-  { layerId: 29, kind: "highway", limit: 20 },
-  { layerId: 30, kind: "secondary-highway", limit: 50 },
-  { layerId: 31, kind: "connecting-road", limit: 80 },
-  { layerId: 32, kind: "local-road", limit: 120 },
-  { layerId: 33, kind: "ramp", limit: 20 },
-  { layerId: 37, kind: "trail", limit: 100 }
+  { layerId: 29, kind: "highway" },
+  { layerId: 30, kind: "secondary-highway" },
+  { layerId: 31, kind: "connecting-road" },
+  { layerId: 32, kind: "local-road" },
+  { layerId: 33, kind: "ramp" },
+  { layerId: 37, kind: "trail" }
 ] as const;
 
-const requestTimeoutMs = 18_000;
+const transportPageSize = 1_000;
+const transportMaxFeaturesPerLayer = 3_000;
+
+const jsonRequestTimeoutMs = 45_000;
+const rasterDownloadTimeoutMs = 120_000;
 
 const safeDatasetLocations: SafeDatasetLocation[] = [
   {
@@ -240,7 +244,9 @@ export async function handleSafeDatasetImport(
     sourceImageName: `${location.name} safe dataset`,
     corners,
     quality: "fast-preview",
-    heightSource: "open-meteo"
+    heightSource: selectedDatasetIds.includes("usgs-contours")
+      ? "usgs-contours"
+      : "open-meteo"
   };
   const [manifest, terrainResult, contourFeatures, hydroFeatures, transportFeatures] =
     await Promise.all([
@@ -441,26 +447,52 @@ async function fetchContourCount(location: SafeDatasetLocation) {
 async function fetchTransportationFeatures(location: SafeDatasetLocation) {
   const responses = await Promise.all(
     transportLayerConfig.map((layer) =>
-      fetchJson<TransportResponse>(
-        getTransportQueryUrl(location, layer.layerId, layer.limit, layer.kind)
+      fetchTransportLayerFeatures(location, layer.layerId, layer.kind).catch(
+        () => [] as Array<{ kind: string; feature: TransportFeature }>
       )
-        .then((payload) =>
-          (payload.features ?? []).map((feature) => ({
-            kind: layer.kind,
-            feature
-          }))
-        )
-        .catch(() => [] as Array<{ kind: string; feature: TransportFeature }>)
     )
   );
   return responses.flat();
+}
+
+async function fetchTransportLayerFeatures(
+  location: SafeDatasetLocation,
+  layerId: number,
+  layerKind: (typeof transportLayerConfig)[number]["kind"]
+) {
+  const features: Array<{ kind: string; feature: TransportFeature }> = [];
+  let offset = 0;
+
+  while (features.length < transportMaxFeaturesPerLayer) {
+    const remaining = transportMaxFeaturesPerLayer - features.length;
+    const pageSize = Math.min(transportPageSize, remaining);
+    const payload = await fetchJson<TransportResponse>(
+      getTransportQueryUrl(location, layerId, pageSize, layerKind, offset)
+    );
+    const batch = payload.features ?? [];
+    features.push(
+      ...batch.map((feature) => ({
+        kind: layerKind,
+        feature
+      }))
+    );
+
+    if (batch.length < pageSize) {
+      break;
+    }
+
+    offset += batch.length;
+  }
+
+  return features;
 }
 
 function getTransportQueryUrl(
   location: SafeDatasetLocation,
   layerId: number,
   limit: number,
-  layerKind: (typeof transportLayerConfig)[number]["kind"]
+  layerKind: (typeof transportLayerConfig)[number]["kind"],
+  offset = 0
 ) {
   const url = new URL(
     `https://carto.nationalmap.gov/arcgis/rest/services/transportation/MapServer/${layerId}/query`
@@ -478,6 +510,9 @@ function getTransportQueryUrl(
   url.searchParams.set("outSR", "4326");
   url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
   url.searchParams.set("resultRecordCount", String(limit));
+  if (offset > 0) {
+    url.searchParams.set("resultOffset", String(offset));
+  }
   return url;
 }
 
@@ -778,7 +813,7 @@ async function downloadRasterExport(
 ) {
   await mkdir(dirname(localPath), { recursive: true });
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const timeout = setTimeout(() => controller.abort(), rasterDownloadTimeoutMs);
 
   try {
     const response = await fetch(buildRasterExportUrl(location, options, "image"), {
@@ -789,6 +824,8 @@ async function downloadRasterExport(
     }
 
     await writeFile(localPath, Buffer.from(await response.arrayBuffer()));
+  } catch (error) {
+    throw formatProviderFetchError(error, "USGS raster download", rasterDownloadTimeoutMs);
   } finally {
     clearTimeout(timeout);
   }
@@ -1074,7 +1111,7 @@ function summarizeTnmProduct(product: TnmProduct) {
 
 async function fetchJson<T>(url: URL): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const timeout = setTimeout(() => controller.abort(), jsonRequestTimeoutMs);
 
   try {
     const response = await fetch(url, {
@@ -1085,9 +1122,25 @@ async function fetchJson<T>(url: URL): Promise<T> {
       throw new Error(`${url.hostname} request failed: ${response.status}`);
     }
     return (await response.json()) as T;
+  } catch (error) {
+    throw formatProviderFetchError(error, url.hostname, jsonRequestTimeoutMs);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function formatProviderFetchError(
+  error: unknown,
+  source: string,
+  timeoutMs: number
+): Error {
+  if (error instanceof Error && error.name === "AbortError") {
+    return new Error(
+      `${source} timed out after ${Math.round(timeoutMs / 1000)}s. USGS services can be slow — retry in a moment or import fewer datasets at once.`
+    );
+  }
+
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function bboxString(location: SafeDatasetLocation) {

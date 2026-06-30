@@ -1113,11 +1113,11 @@ export const openMeteoElevationProvider: ElevationProvider = {
 async function fetchWithRetry(url: URL) {
   let response = await fetch(url);
 
-  for (let attempt = 0; attempt < 2 && shouldRetry(response); attempt += 1) {
+  for (let attempt = 0; attempt < 4 && shouldRetry(response); attempt += 1) {
     const retryAfterSeconds = Number(response.headers.get("retry-after"));
     const retryDelay = Number.isFinite(retryAfterSeconds)
       ? retryAfterSeconds * 1000
-      : 900 * (attempt + 1);
+      : 1_500 * (attempt + 1) ** 2;
     await delay(retryDelay);
     response = await fetch(url);
   }

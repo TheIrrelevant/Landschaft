@@ -3,16 +3,25 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-06-28
 last-model: codex-gpt-5
-  last-change: log canvas tool dock and sidebar cleanup
+last-change: log GeoTIFF raster import support
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Added MCP safe dataset search, manifest, and import tools backed by USGS TNMAccess, NAIP and 3DEP ImageServer clipped TIFF exports, and contour services.
+- Persisted MCP-imported NAIP and 3DEP clipped TIFF exports into web-served provider assets.
+- Connected the web safe-location import flow to the MCP HTTP bridge and render provider GeoTIFF raster layers in the scene.
+- Replaced the sidebar orthophoto coordinate setup with USA safe-location search, provider dataset checkboxes, and a start-import flow.
+- Added a basic Fethiye-Oludeniz KML/KMZ test fixture for deterministic vector import checks.
+- Removed the invalid Fethiye-Oludeniz data pipeline experiment and downloaded geospatial dataset outputs.
 - Moved vector import, raster import, vector drawing, and draft LCA actions out of the sidebar into a bottom-center canvas tool dock.
 - Removed the sidebar LCA Analysis panel and its dedicated styles.
 - Exposed layer deletion on every layer row instead of limiting deletion to removable foundational and LCA layers.
+- Changed default terrain generation to the global Open-Meteo DEM source and fall back to it automatically when USGS contour coverage is unavailable.
+- Normalized sea-connected low coastal DEM cells to sea level so Open-Meteo terrain does not raise water areas as terrain mass.
+- Added GeoTIFF raster import support by converting `.tif` / `.tiff` files into canvas previews and reading their map bounds for layer placement.
 - Started Checkpoint 3 with map evidence serialization, draft LCA analysis in the sidebar, editable `lca` vector layers, review controls, and shared MCP `map_read` / `map_write_draft` handlers.
 - Completed Checkpoint 2 with project-extent clipping, georeferenced raster world-file import, vertex editing with split/merge/snap, GeoJSON export, and normalized project-metre geometry storage.
 - Added layer deletion for removable foundational and LCA layers from the sidebar layer list.

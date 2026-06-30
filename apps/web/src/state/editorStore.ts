@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Zustand store for Landschaft editor layers and selected area state.
- * last-updated: 2026-06-28
+ * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: allow every layer row to be deleted
+ * last-change: add safe dataset location selection and queued provider imports
  * ---end-metadata---
  */
 import {
@@ -38,6 +38,42 @@ import {
 } from "../geo/projectGeometry";
 
 type EditorMode = "top-view" | "terrain-3d";
+type SafeDatasetId =
+  | "naip-ortho"
+  | "dem-3dep"
+  | "usgs-contours"
+  | "hydrography"
+  | "transportation";
+type SafeDatasetImportStatus = "idle" | "ready" | "importing" | "complete" | "error";
+
+interface SafeDatasetLocation {
+  id: string;
+  name: string;
+  region: string;
+  country: "USA";
+  bbox: {
+    west: number;
+    south: number;
+    east: number;
+    north: number;
+  };
+  targetCrs: string;
+  dataSource: string;
+  datasets: SafeDatasetId[];
+}
+
+interface SafeDatasetBackendImportResult {
+  project: ProjectMetadata;
+  terrain: TerrainModel;
+  layers: PlanningLayer[];
+  assets?: {
+    datasetId: SafeDatasetId;
+    publicPath: string;
+    bytes: number;
+  }[];
+  status: "imported";
+}
+
 type EditorPersistedState = Pick<
   EditorState,
   | "coordinateStep"
@@ -58,6 +94,12 @@ interface EditorState {
   terrainGenerating: boolean;
   terrainGenerationError: string | null;
   terrainHeightSource: TerrainHeightSource;
+  safeDatasetLocations: SafeDatasetLocation[];
+  safeDatasetLocationId: string | null;
+  safeDatasetSearchQuery: string;
+  safeDatasetSelectedIds: SafeDatasetId[];
+  safeDatasetImportStatus: SafeDatasetImportStatus;
+  safeDatasetImportMessage: string | null;
   orthophotoPreviewUrl: string | null;
   hoveredFeatureId: string | null;
   hoveredLayerId: string | null;
@@ -83,6 +125,7 @@ interface EditorState {
     previewUrl: string,
     options?: {
       worldFileText?: string;
+      rasterGeoreference?: RasterGeoreference;
       imageWidthPixels: number;
       imageHeightPixels: number;
     }
@@ -121,10 +164,69 @@ interface EditorState {
   selectLayer: (layerId: string) => void;
   setMode: (mode: EditorMode) => void;
   setTerrainHeightSource: (heightSource: TerrainHeightSource) => void;
+  selectSafeDatasetLocation: (locationId: string) => void;
+  setSafeDatasetSearchQuery: (query: string) => void;
+  startSafeDatasetImport: () => Promise<void>;
+  toggleSafeDataset: (datasetId: SafeDatasetId) => void;
   setOrthophotoPreview: (fileName: string, previewUrl: string) => void;
   setLayerOpacity: (layerId: string, opacity: number) => void;
   toggleLayer: (layerId: string) => void;
 }
+
+const safeDatasetCatalog: Record<
+  SafeDatasetId,
+  { label: string; provider: string; category: PlanningLayer["category"] }
+> = {
+  "naip-ortho": {
+    label: "NAIP orthophoto",
+    provider: "USGS NAIP ImageServer",
+    category: "land-use-settlement"
+  },
+  "dem-3dep": {
+    label: "3DEP DEM",
+    provider: "USGS 3D Elevation Program",
+    category: "geomorphology"
+  },
+  "usgs-contours": {
+    label: "USGS contours",
+    provider: "USGS National Map Contours",
+    category: "geomorphology"
+  },
+  hydrography: {
+    label: "Hydrography",
+    provider: "USGS National Hydrography Dataset",
+    category: "hydrology"
+  },
+  transportation: {
+    label: "Transportation",
+    provider: "USGS National Map Transportation",
+    category: "infrastructure-utilities"
+  }
+};
+
+const safeDatasetLocations: SafeDatasetLocation[] = [
+  {
+    id: "boulder-flatirons-co",
+    name: "Boulder Flatirons",
+    region: "Colorado",
+    country: "USA",
+    bbox: {
+      west: -105.306,
+      south: 39.985,
+      east: -105.252,
+      north: 40.028
+    },
+    targetCrs: "EPSG:26913",
+    dataSource: "USGS The National Map / NAIP",
+    datasets: [
+      "naip-ortho",
+      "dem-3dep",
+      "usgs-contours",
+      "hydrography",
+      "transportation"
+    ]
+  }
+];
 
 const defaultCorners: OrthophotoCorner[] = [
   { label: "NW", latitude: 41.0312, longitude: 29.0141 },
@@ -551,6 +653,85 @@ function ensureProjectBoundaryLayer(layers: PlanningLayer[], project: ProjectMet
   return insertOrReplaceLayer(layers, createProjectBoundaryLayer(project));
 }
 
+function getSafeDatasetLocation(locationId: string | null) {
+  return (
+    safeDatasetLocations.find((location) => location.id === locationId) ??
+    safeDatasetLocations[0]
+  );
+}
+
+function getCornersFromSafeLocation(
+  location: SafeDatasetLocation
+): OrthophotoCorner[] {
+  return [
+    { label: "NW", latitude: location.bbox.north, longitude: location.bbox.west },
+    { label: "NE", latitude: location.bbox.north, longitude: location.bbox.east },
+    { label: "SE", latitude: location.bbox.south, longitude: location.bbox.east },
+    { label: "SW", latitude: location.bbox.south, longitude: location.bbox.west }
+  ];
+}
+
+function createSafeDatasetLayers(
+  project: ProjectMetadata,
+  location: SafeDatasetLocation,
+  datasetIds: SafeDatasetId[]
+): PlanningLayer[] {
+  return datasetIds.map((datasetId) => {
+    const dataset = safeDatasetCatalog[datasetId];
+    return {
+      id: `safe-data-${datasetId}`,
+      name: dataset.label,
+      kind: datasetId === "naip-ortho" ? "orthophoto" : "foundational-map",
+      visible: true,
+      opacity: datasetId === "naip-ortho" ? 1 : 0.68,
+      reviewStatus: "draft",
+      category: dataset.category,
+      geometryType: datasetId === "naip-ortho" || datasetId === "dem-3dep"
+        ? "raster"
+        : datasetId === "usgs-contours" || datasetId === "transportation"
+        ? "line"
+        : "mixed",
+      source: {
+        sourceName: `${dataset.provider} / ${location.name}`,
+        sourceType: "external-api",
+        sourceDate: new Date().toISOString().slice(0, 10),
+        coordinateReferenceSystem: project.coordinateReferenceSystem,
+        accuracyStatus: "public-dataset",
+        confidence: 0.86
+      },
+      style: {
+        stroke: getSafeDatasetColor(datasetId),
+        fill: getSafeDatasetColor(datasetId),
+        strokeWidth: datasetId === "transportation" ? 2 : 1.5
+      },
+      legend: [{ label: dataset.label, color: getSafeDatasetColor(datasetId) }],
+      planningImpactNotes: [
+        "Queued for MCP-backed provider import.",
+        `AOI: ${location.name}, ${location.region}.`,
+        `Target processing CRS: ${location.targetCrs}.`
+      ],
+      locked: true
+    };
+  });
+}
+
+function getSafeDatasetColor(datasetId: SafeDatasetId) {
+  switch (datasetId) {
+    case "naip-ortho":
+      return "#6f7f68";
+    case "dem-3dep":
+      return "#8c7a52";
+    case "usgs-contours":
+      return "#5f6f8a";
+    case "hydrography":
+      return "#367aa2";
+    case "transportation":
+      return "#5a5f66";
+    default:
+      return "#68706a";
+  }
+}
+
 function createTerrainRequest(
   project: ProjectMetadata,
   heightSource: TerrainHeightSource
@@ -626,7 +807,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   terrainGenerated: storedProjectSnapshot?.terrainGenerated ?? false,
   terrainGenerating: false,
   terrainGenerationError: null,
-  terrainHeightSource: "usgs-contours",
+  terrainHeightSource: "open-meteo",
+  safeDatasetLocations,
+  safeDatasetLocationId: safeDatasetLocations[0]?.id ?? null,
+  safeDatasetSearchQuery: "",
+  safeDatasetSelectedIds: safeDatasetLocations[0]?.datasets ?? [],
+  safeDatasetImportStatus: "idle",
+  safeDatasetImportMessage: null,
   orthophotoPreviewUrl: storedProjectSnapshot?.orthophotoPreviewUrl ?? null,
   coordinateStep: storedProjectSnapshot?.coordinateStep ?? null,
   inspectorOpen: false,
@@ -708,7 +895,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => {
       const imageWidthPixels = options?.imageWidthPixels ?? 1;
       const imageHeightPixels = options?.imageHeightPixels ?? 1;
-      const rasterGeoreference = options?.worldFileText
+      const rasterGeoreference = options?.rasterGeoreference
+        ? options.rasterGeoreference
+        : options?.worldFileText
         ? createRasterGeoreferenceFromWorldFile(
             parseWorldFile(options.worldFileText),
             imageWidthPixels,
@@ -1397,6 +1586,113 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setViewScaleMode: (mode) => set({ viewScaleMode: mode }),
   setTerrainHeightSource: (heightSource) =>
     set({ terrainHeightSource: heightSource }),
+  setSafeDatasetSearchQuery: (query) => set({ safeDatasetSearchQuery: query }),
+  selectSafeDatasetLocation: (locationId) =>
+    set(() => {
+      const location = getSafeDatasetLocation(locationId);
+      return {
+        safeDatasetLocationId: location.id,
+        safeDatasetSelectedIds: location.datasets,
+        safeDatasetImportStatus: "ready" as const,
+        safeDatasetImportMessage: `${location.name} selected.`
+      };
+    }),
+  toggleSafeDataset: (datasetId) =>
+    set((state) => {
+      const isSelected = state.safeDatasetSelectedIds.includes(datasetId);
+      return {
+        safeDatasetSelectedIds: isSelected
+          ? state.safeDatasetSelectedIds.filter((id) => id !== datasetId)
+          : [...state.safeDatasetSelectedIds, datasetId],
+        safeDatasetImportStatus: "ready" as const,
+        safeDatasetImportMessage: null
+      };
+    }),
+  startSafeDatasetImport: async () => {
+    const state = get();
+    const location = getSafeDatasetLocation(state.safeDatasetLocationId);
+    const datasetIds = state.safeDatasetSelectedIds.filter((datasetId) =>
+      location.datasets.includes(datasetId)
+    );
+
+    if (datasetIds.length === 0) {
+      set({
+        safeDatasetImportStatus: "error",
+        safeDatasetImportMessage: "Select at least one dataset.",
+        terrainGenerationError: "Select at least one dataset."
+      });
+      return;
+    }
+
+    const corners = getCornersFromSafeLocation(location);
+    const project = {
+      ...createProject(corners, `${location.name} safe dataset`),
+      name: location.name,
+      sourceImageName: `${location.name} safe dataset`
+    };
+    const queuedLayers = createSafeDatasetLayers(project, location, datasetIds);
+    const heightSource: TerrainHeightSource = datasetIds.includes("usgs-contours")
+      ? "usgs-contours"
+      : "open-meteo";
+
+    set({
+      activeMode: "terrain-3d",
+      project,
+      terrainHeightSource: heightSource,
+      layers: ensureProjectBoundaryLayer(queuedLayers, project),
+      selectedLayerId: "project-boundary",
+      selectedFeatureId: null,
+      selectedArea: null,
+      selectedVertexIndex: null,
+      terrainGenerated: false,
+      terrainGenerating: true,
+      terrainGenerationError: null,
+      safeDatasetImportStatus: "importing",
+      safeDatasetImportMessage: `Importing ${datasetIds.length} dataset sources from ${location.dataSource}.`,
+      inspectorOpen: false,
+      coordinateStep: 4,
+      orthophotoPreviewUrl: null
+    });
+
+    try {
+      const result = await fetchSafeDatasetImport(location.id, datasetIds);
+      const layers = ensureProjectBoundaryLayer(result.layers, result.project);
+      const nextState = {
+        activeMode: "terrain-3d" as const,
+        project: result.project,
+        terrain: result.terrain,
+        layers,
+        orthophotoPreviewUrl: null,
+        selectedLayerId: "terrain-mesh",
+        selectedFeatureId: null,
+        selectedArea: null,
+        selectedVertexIndex: null,
+        terrainGenerated: true,
+        terrainGenerating: false,
+        terrainGenerationError: null,
+        terrainHeightSource: "open-meteo" as const,
+        safeDatasetImportStatus: "complete" as const,
+        safeDatasetImportMessage: `Imported ${result.assets?.length ?? 0} provider assets through the MCP backend.`,
+        inspectorOpen: false,
+        coordinateStep: 4
+      };
+      saveProjectSnapshot(toProjectSnapshot(nextState));
+      set(nextState);
+    } catch (error) {
+      set({
+        terrainGenerating: false,
+        terrainGenerationError:
+          error instanceof Error
+            ? error.message
+            : "Safe dataset import failed.",
+        safeDatasetImportStatus: "error",
+        safeDatasetImportMessage:
+          error instanceof Error
+            ? error.message
+            : "Safe dataset import failed."
+      });
+    }
+  },
   setOrthophotoPreview: (fileName, previewUrl) =>
     set((state) => {
       if (state.orthophotoPreviewUrl) {
@@ -1445,6 +1741,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { layers };
     })
 }));
+
+async function fetchSafeDatasetImport(
+  locationId: string,
+  datasetIds: SafeDatasetId[]
+): Promise<SafeDatasetBackendImportResult> {
+  const response = await fetch("http://127.0.0.1:8787/safe-dataset/import", {
+    body: JSON.stringify({
+      locationId,
+      datasetIds,
+      persistAssets: true
+    }),
+    headers: {
+      "content-type": "application/json"
+    },
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    throw new Error(
+      payload?.error ??
+        "Safe dataset backend is unavailable. Start the MCP server with npm run dev:mcp."
+    );
+  }
+
+  return (await response.json()) as SafeDatasetBackendImportResult;
+}
 
 type GeoJsonPayload = {
   type?: string;

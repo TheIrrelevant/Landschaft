@@ -1,36 +1,61 @@
 /*
  * ---metadata---
  * type: app-source
- * description: Upload-first orthophoto setup with sequential corner coordinate prompts.
- * last-updated: 2026-06-28
+ * description: Safe location search and dataset selection panel for provider-backed imports.
+ * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: store uploaded orthophoto as layer image data
+ * last-change: replace orthophoto coordinate setup with safe dataset location search
  * ---end-metadata---
  */
-import { ChevronDown, ChevronUp, CloudUpload, Image } from "lucide-react";
-import { useState } from "react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Database,
+  MapPin,
+  Play,
+  Search
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import { useEditorStore } from "../state/editorStore";
+
+const datasetLabels = {
+  "naip-ortho": "NAIP orthophoto",
+  "dem-3dep": "3DEP DEM",
+  "usgs-contours": "USGS contours",
+  hydrography: "Hydrography",
+  transportation: "Transportation"
+} as const;
 
 export function TerrainSetupPanel() {
   const {
-    advanceCoordinateStep,
-    coordinateStep,
-    generateTerrain,
-    project,
-    setCornerCoordinate,
-    setOrthophotoPreview,
-    setTerrainHeightSource,
+    safeDatasetImportMessage,
+    safeDatasetImportStatus,
+    safeDatasetLocationId,
+    safeDatasetLocations,
+    safeDatasetSearchQuery,
+    safeDatasetSelectedIds,
+    selectSafeDatasetLocation,
+    setSafeDatasetSearchQuery,
+    startSafeDatasetImport,
     terrainGenerating,
     terrainGenerationError,
-    terrainHeightSource
+    toggleSafeDataset
   } = useEditorStore();
   const [sectionOpen, setSectionOpen] = useState(true);
-  const activeCorner =
-    coordinateStep !== null && coordinateStep < project.corners.length
-      ? project.corners[coordinateStep]
-      : null;
-  const activeStep = coordinateStep ?? 0;
-  const isLastStep = activeStep === project.corners.length - 1;
+  const normalizedQuery = safeDatasetSearchQuery.trim().toLowerCase();
+  const filteredLocations = useMemo(
+    () =>
+      safeDatasetLocations.filter((location) =>
+        `${location.name} ${location.region} ${location.country}`
+          .toLowerCase()
+          .includes(normalizedQuery)
+      ),
+    [normalizedQuery, safeDatasetLocations]
+  );
+  const selectedLocation =
+    safeDatasetLocations.find((location) => location.id === safeDatasetLocationId) ??
+    safeDatasetLocations[0];
+  const canStart = Boolean(selectedLocation && safeDatasetSelectedIds.length > 0);
 
   return (
     <section className="terrain-setup">
@@ -41,8 +66,8 @@ export function TerrainSetupPanel() {
         type="button"
       >
         <span className="section-title-leading">
-          <Image size={16} strokeWidth={1.75} />
-          <span>Orthophoto</span>
+          <Database size={16} strokeWidth={1.75} />
+          <span>Location Data</span>
         </span>
         {sectionOpen ? (
           <ChevronUp size={15} strokeWidth={1.75} />
@@ -53,149 +78,90 @@ export function TerrainSetupPanel() {
 
       {sectionOpen ? (
         <div className="terrain-setup-body">
-          <label className="file-control">
-            <CloudUpload size={26} strokeWidth={1.5} />
-            <strong>{project.sourceImageName ?? "Upload orthophoto"}</strong>
-            <span>Drag &amp; drop or click to browse</span>
+          <label className="location-search">
+            <Search size={15} strokeWidth={1.75} />
             <input
-              accept="image/*"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-
-                if (file) {
-                  readFileAsDataUrl(file).then((previewUrl) => {
-                    setOrthophotoPreview(file.name, previewUrl);
-                  });
-                }
-              }}
-              type="file"
+              onChange={(event) => setSafeDatasetSearchQuery(event.target.value)}
+              placeholder="Search USA test location"
+              type="search"
+              value={safeDatasetSearchQuery}
             />
           </label>
 
-          <p className="upload-note">
-            After upload, coordinates are requested from top-left clockwise.
-          </p>
+          <div className="location-results">
+            {filteredLocations.map((location) => {
+              const isSelected = location.id === safeDatasetLocationId;
 
-          <label className="terrain-source-control">
-            <span>Mesh source</span>
-            <select
-              onChange={(event) => {
-                setTerrainHeightSource(
-                  event.target.value === "open-meteo"
-                    ? "open-meteo"
-                    : "usgs-contours"
-                );
-              }}
-              value={terrainHeightSource}
-            >
-              <option value="usgs-contours">Izohips / USGS contours</option>
-              <option value="open-meteo">External DEM fallback</option>
-            </select>
-          </label>
-
-          <div className={`coordinate-step ${activeCorner ? "" : "disabled"}`}>
-            <span className="step-badge">
-              {activeCorner ? `${activeStep + 1} of ${project.corners.length}` : "1 of 4"}
-            </span>
-            <p className="step-label">
-              {activeCorner ? getCornerName(activeCorner.label) : "Top-left coordinate"}
-            </p>
-            <div className="coordinate-fields">
-              <input
-                disabled={!activeCorner}
-                onChange={(event) => {
-                  if (!activeCorner) {
-                    return;
-                  }
-
-                  setCornerCoordinate(
-                    activeCorner.label,
-                    "latitude",
-                    Number(event.target.value)
-                  );
-                }}
-                placeholder="Latitude"
-                step="0.000001"
-                type="number"
-                value={activeCorner ? activeCorner.latitude || "" : ""}
-              />
-              <input
-                disabled={!activeCorner}
-                onChange={(event) => {
-                  if (!activeCorner) {
-                    return;
-                  }
-
-                  setCornerCoordinate(
-                    activeCorner.label,
-                    "longitude",
-                    Number(event.target.value)
-                  );
-                }}
-                placeholder="Longitude"
-                step="0.000001"
-                type="number"
-                value={activeCorner ? activeCorner.longitude || "" : ""}
-              />
-            </div>
-            <button
-              className="secondary-action"
-              disabled={!activeCorner || terrainGenerating}
-              onClick={
-                activeCorner
-                  ? isLastStep
-                    ? generateTerrain
-                    : advanceCoordinateStep
-                  : undefined
-              }
-              type="button"
-            >
-              {terrainGenerating
-                ? "Generating"
-                : activeCorner && isLastStep
-                  ? "Generate terrain"
-                  : "Next"}
-              <span aria-hidden="true">→</span>
-            </button>
+              return (
+                <button
+                  className={`location-result ${isSelected ? "active" : ""}`}
+                  key={location.id}
+                  onClick={() => selectSafeDatasetLocation(location.id)}
+                  type="button"
+                >
+                  <span className="location-result-icon" aria-hidden="true">
+                    <MapPin size={14} strokeWidth={1.75} />
+                  </span>
+                  <span className="location-result-copy">
+                    <strong>{location.name}</strong>
+                    <span>
+                      {location.region}, {location.country}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
+          {selectedLocation ? (
+            <>
+              <div className="safe-location-summary">
+                <div>
+                  <span>Source</span>
+                  <strong>{selectedLocation.dataSource}</strong>
+                </div>
+                <div>
+                  <span>Target CRS</span>
+                  <strong>{selectedLocation.targetCrs}</strong>
+                </div>
+              </div>
+
+              <fieldset className="dataset-checklist">
+                <legend>Available data</legend>
+                {selectedLocation.datasets.map((datasetId) => (
+                  <label className="dataset-option" key={datasetId}>
+                    <input
+                      checked={safeDatasetSelectedIds.includes(datasetId)}
+                      onChange={() => toggleSafeDataset(datasetId)}
+                      type="checkbox"
+                    />
+                    <span>{datasetLabels[datasetId]}</span>
+                  </label>
+                ))}
+              </fieldset>
+
+              <button
+                className="secondary-action location-import-action"
+                disabled={!canStart || terrainGenerating}
+                onClick={startSafeDatasetImport}
+                type="button"
+              >
+                <Play size={14} strokeWidth={1.9} />
+                {terrainGenerating ? "Importing" : "Start import"}
+              </button>
+            </>
+          ) : null}
+
+          {safeDatasetImportMessage ? (
+            <p className={`upload-note import-status-${safeDatasetImportStatus}`}>
+              {safeDatasetImportMessage}
+            </p>
+          ) : null}
           {terrainGenerationError ? (
-            <p className="upload-note">{terrainGenerationError}</p>
+            <p className="upload-note import-status-error">{terrainGenerationError}</p>
           ) : null}
         </div>
       ) : null}
     </section>
   );
-}
-
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-      } else {
-        reject(new Error("Image preview could not be read."));
-      }
-    });
-    reader.addEventListener("error", () => {
-      reject(new Error("Image preview could not be read."));
-    });
-    reader.readAsDataURL(file);
-  });
-}
-
-function getCornerName(label: string) {
-  switch (label) {
-    case "NW":
-      return "Top-left coordinate";
-    case "NE":
-      return "Top-right coordinate";
-    case "SE":
-      return "Bottom-right coordinate";
-    case "SW":
-      return "Bottom-left coordinate";
-    default:
-      return "Coordinate";
-  }
 }

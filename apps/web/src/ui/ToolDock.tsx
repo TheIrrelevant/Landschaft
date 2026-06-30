@@ -4,11 +4,13 @@
  * description: Bottom-center canvas tool dock for map imports, vector drawing, and draft LCA actions.
  * last-updated: 2026-06-29
  * last-model: codex-gpt-5
- * last-change: add bottom tool dock for data and analysis actions
+ * last-change: avoid stack overflow while rendering GeoTIFF previews
  * ---end-metadata---
  */
 import { Map, MapPin, Pentagon, Route, Shapes, Sparkles } from "lucide-react";
 import { useRef, useState } from "react";
+import { fromArrayBuffer } from "geotiff";
+import { createRasterGeoreferenceFromMapBounds } from "../geo/projectGeometry";
 import { useEditorStore } from "../state/editorStore";
 
 export function ToolDock() {
@@ -19,6 +21,7 @@ export function ToolDock() {
     importRasterOverlay,
     layers,
     lcaAnalyzing,
+    project,
     runLcaDraftAnalysis,
     terrainGenerated
   } = useEditorStore();
@@ -134,12 +137,12 @@ export function ToolDock() {
         type="file"
       />
       <input
-        accept="image/*,.pgw,.jgw,.tfw,.wld"
+        accept="image/*,.tif,.tiff,.pgw,.jgw,.tfw,.wld"
         className="tool-file-input"
         multiple
         onChange={(event) => {
           const files = Array.from(event.target.files ?? []);
-          const imageFile = files.find((file) => file.type.startsWith("image/"));
+          const imageFile = files.find((file) => isRasterImageFile(file));
           const worldFile = files.find((file) => /\.(pgw|jgw|tfw|wld)$/i.test(file.name));
 
           if (!imageFile) {
@@ -148,13 +151,10 @@ export function ToolDock() {
             return;
           }
 
-          Promise.all([
-            readFileAsDataUrl(imageFile),
-            readImageDimensions(imageFile),
-            worldFile ? readFileAsText(worldFile) : Promise.resolve(undefined)
-          ])
-            .then(([previewUrl, dimensions, worldFileText]) => {
+          readRasterImport(imageFile, project, worldFile)
+            .then(({ dimensions, previewUrl, rasterGeoreference, worldFileText }) => {
               importRasterOverlay(imageFile.name, previewUrl, {
+                rasterGeoreference,
                 worldFileText,
                 imageWidthPixels: dimensions.width,
                 imageHeightPixels: dimensions.height
@@ -173,6 +173,115 @@ export function ToolDock() {
       />
     </div>
   );
+}
+
+function isRasterImageFile(file: File) {
+  return file.type.startsWith("image/") || /\.(tif|tiff)$/i.test(file.name);
+}
+
+async function readRasterImport(
+  imageFile: File,
+  project: ReturnType<typeof useEditorStore.getState>["project"],
+  worldFile?: File
+) {
+  if (/\.(tif|tiff)$/i.test(imageFile.name)) {
+    return readGeoTiffAsRasterImport(imageFile, project);
+  }
+
+  const [previewUrl, dimensions, worldFileText] = await Promise.all([
+    readFileAsDataUrl(imageFile),
+    readImageDimensions(imageFile),
+    worldFile ? readFileAsText(worldFile) : Promise.resolve(undefined)
+  ]);
+
+  return { dimensions, previewUrl, rasterGeoreference: undefined, worldFileText };
+}
+
+async function readGeoTiffAsRasterImport(
+  file: File,
+  project: ReturnType<typeof useEditorStore.getState>["project"]
+) {
+  const arrayBuffer = await file.arrayBuffer();
+  const tiff = await fromArrayBuffer(arrayBuffer);
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const data = await image.readRasters({ interleave: true, samples: [0] });
+  const { max, min } = getFiniteRasterRange(data as ArrayLike<number>);
+  const range = Math.max(max - min, 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("GeoTIFF preview could not be created.");
+  }
+
+  const imageData = context.createImageData(width, height);
+  for (let index = 0; index < width * height; index += 1) {
+    const value = Number((data as ArrayLike<number>)[index] ?? min);
+    const tone = Number.isFinite(value)
+      ? Math.round(((value - min) / range) * 255)
+      : 0;
+    const offset = index * 4;
+    imageData.data[offset] = tone;
+    imageData.data[offset + 1] = tone;
+    imageData.data[offset + 2] = tone;
+    imageData.data[offset + 3] = 255;
+  }
+  context.putImageData(imageData, 0, 0);
+
+  const bounds = image.getBoundingBox();
+  const rasterGeoreference =
+    bounds.length === 4 && bounds.every(Number.isFinite)
+      ? createRasterGeoreferenceFromMapBounds(
+          bounds as [number, number, number, number],
+          width,
+          height,
+          project
+        )
+      : undefined;
+
+  return {
+    dimensions: { width, height },
+    previewUrl: await canvasToPngObjectUrl(canvas),
+    rasterGeoreference,
+    worldFileText: undefined
+  };
+}
+
+function canvasToPngObjectUrl(canvas: HTMLCanvasElement) {
+  return new Promise<string>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("GeoTIFF preview could not be encoded."));
+        return;
+      }
+
+      resolve(URL.createObjectURL(blob));
+    }, "image/png");
+  });
+}
+
+function getFiniteRasterRange(data: ArrayLike<number>) {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+
+  for (let index = 0; index < data.length; index += 1) {
+    const value = Number(data[index]);
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { min: 0, max: 1 };
+  }
+
+  return { min, max };
 }
 
 function readFileAsText(file: File) {

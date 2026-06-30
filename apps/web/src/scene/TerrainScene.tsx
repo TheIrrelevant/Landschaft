@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Three.js terrain preview scene for the Landschaft editor.
- * last-updated: 2026-06-28
+ * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: add hover inspection events for vector map features
+ * last-change: render MCP-imported GeoTIFF provider raster layers
  * ---end-metadata---
  */
 import {
@@ -19,6 +19,7 @@ import {
   useThree
 } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fromArrayBuffer } from "geotiff";
 import {
   ACESFilmicToneMapping,
   BufferGeometry,
@@ -543,18 +544,24 @@ function useOrthophotoTexture(url: string | null) {
     }
 
     let cancelled = false;
-    const loader = new TextureLoader();
-    loader.load(url, (loadedTexture) => {
-      if (cancelled) {
-        loadedTexture.dispose();
-        return;
-      }
+    const loadTexture = /\.(tif|tiff)(\?|$)/i.test(url)
+      ? loadGeoTiffTexture(url)
+      : loadImageTexture(url);
 
-      loadedTexture.colorSpace = SRGBColorSpace;
-      loadedTexture.anisotropy = 4;
-      loadedTexture.needsUpdate = true;
-      setTexture(loadedTexture);
-    });
+    loadTexture
+      .then((loadedTexture) => {
+        if (cancelled) {
+          loadedTexture.dispose();
+          return;
+        }
+
+        setTexture(loadedTexture);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTexture(null);
+        }
+      });
 
     return () => {
       cancelled = true;
@@ -569,6 +576,114 @@ function useOrthophotoTexture(url: string | null) {
   }, [url]);
 
   return texture;
+}
+
+function loadImageTexture(url: string) {
+  return new Promise<Texture>((resolve, reject) => {
+    const loader = new TextureLoader();
+    loader.load(
+      url,
+      (loadedTexture) => {
+        loadedTexture.colorSpace = SRGBColorSpace;
+        loadedTexture.anisotropy = 4;
+        loadedTexture.needsUpdate = true;
+        resolve(loadedTexture);
+      },
+      undefined,
+      reject
+    );
+  });
+}
+
+async function loadGeoTiffTexture(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`GeoTIFF texture request failed: ${response.status}`);
+  }
+
+  const tiff = await fromArrayBuffer(await response.arrayBuffer());
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const sampleCount = image.getSamplesPerPixel();
+  const samples = sampleCount >= 3 ? [0, 1, 2] : [0];
+  const raster = (await image.readRasters({
+    interleave: true,
+    samples
+  })) as ArrayLike<number>;
+  const range = getRasterDisplayRange(raster, sampleCount >= 3 ? 3 : 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("GeoTIFF texture canvas could not be created.");
+  }
+
+  const imageData = context.createImageData(width, height);
+  const channels = sampleCount >= 3 ? 3 : 1;
+  for (let index = 0; index < width * height; index += 1) {
+    const offset = index * 4;
+    if (channels === 3) {
+      imageData.data[offset] = normalizeRasterTone(
+        Number(raster[index * 3]),
+        range.min,
+        range.max
+      );
+      imageData.data[offset + 1] = normalizeRasterTone(
+        Number(raster[index * 3 + 1]),
+        range.min,
+        range.max
+      );
+      imageData.data[offset + 2] = normalizeRasterTone(
+        Number(raster[index * 3 + 2]),
+        range.min,
+        range.max
+      );
+    } else {
+      const tone = normalizeRasterTone(Number(raster[index]), range.min, range.max);
+      imageData.data[offset] = tone;
+      imageData.data[offset + 1] = tone;
+      imageData.data[offset + 2] = tone;
+    }
+    imageData.data[offset + 3] = 255;
+  }
+  context.putImageData(imageData, 0, 0);
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function getRasterDisplayRange(raster: ArrayLike<number>, stride: number) {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+
+  for (let index = 0; index < raster.length; index += stride) {
+    for (let channel = 0; channel < stride; channel += 1) {
+      const value = Number(raster[index + channel]);
+      if (!Number.isFinite(value) || value <= -9999) {
+        continue;
+      }
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    }
+  }
+
+  return {
+    min: Number.isFinite(min) ? min : 0,
+    max: Number.isFinite(max) && max > min ? max : min + 1
+  };
+}
+
+function normalizeRasterTone(value: number, min: number, max: number) {
+  if (!Number.isFinite(value) || value <= -9999) {
+    return 0;
+  }
+
+  return Math.round(Math.min(Math.max((value - min) / (max - min), 0), 1) * 255);
 }
 
 function TerrainMesh({
@@ -1039,7 +1154,11 @@ function LayeredSceneContent() {
           );
         }
 
-        if (layer.kind === "foundational-map" || layer.kind === "lca") {
+        if (
+          layer.kind === "foundational-map" ||
+          layer.kind === "lca" ||
+          (layer.kind === "orthophoto" && layer.id !== "orthophoto-base")
+        ) {
           return (
             <FoundationalLayerContent
               key={layer.id}

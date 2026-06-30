@@ -4,7 +4,7 @@
  * description: Shared geospatial and planning types for Landschaft apps.
  * last-updated: 2026-06-28
  * last-model: codex-gpt-5
- * last-change: add raster georeference, geometry helpers, and LCA map evidence exports
+ * last-change: normalize coastal water elevations for global DEM terrain
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -478,13 +478,39 @@ export async function generateTerrainProjectAsync(
 
   if (request.heightSource === "usgs-contours") {
     const project = createProjectMetadata(request);
-    const terrain = await generateTerrainModelFromUsgsContours(request, generatedAt);
+    try {
+      const terrain = await generateTerrainModelFromUsgsContours(request, generatedAt);
 
-    return {
-      project,
-      terrain,
-      baseLayers: createBaseLayers()
-    };
+      return {
+        project,
+        terrain,
+        baseLayers: createBaseLayers()
+      };
+    } catch (error) {
+      if (!isMissingUsgsContourCoverageError(error)) {
+        throw error;
+      }
+
+      const fallbackRequest: NormalizedTerrainGenerationRequest = {
+        ...request,
+        heightSource: "open-meteo",
+        quality: "fast-preview"
+      };
+      const terrain = await generateTerrainModelFromProvider(
+        fallbackRequest,
+        openMeteoElevationProvider,
+        generatedAt
+      );
+
+      return {
+        project,
+        terrain: {
+          ...terrain,
+          elevationProvider: `${terrain.elevationProvider} (fallback after missing USGS contour coverage)`
+        },
+        baseLayers: createBaseLayers()
+      };
+    }
   }
 
   if (request.heightSource !== "open-meteo") {
@@ -505,6 +531,14 @@ export async function generateTerrainProjectAsync(
   };
 }
 
+function isMissingUsgsContourCoverageError(error: unknown) {
+  return (
+    error instanceof Error &&
+    error.message ===
+      "No USGS contour lines with elevation attributes were found for this extent."
+  );
+}
+
 export async function generateTerrainModelFromProvider(
   request: NormalizedTerrainGenerationRequest,
   provider: ElevationProvider,
@@ -513,13 +547,17 @@ export async function generateTerrainModelFromProvider(
   const extent = getExtentMeters(request.corners);
   const gridSize = getGridSizeForQuality(request.quality);
   const samplePoints = createGridSamplePoints(request.corners, gridSize);
-  const heightmap = await provider.sample(samplePoints);
+  const rawHeightmap = await provider.sample(samplePoints);
 
-  if (heightmap.length !== samplePoints.length) {
+  if (rawHeightmap.length !== samplePoints.length) {
     throw new Error(
-      `Elevation provider returned ${heightmap.length} values for ${samplePoints.length} sample points.`
+      `Elevation provider returned ${rawHeightmap.length} values for ${samplePoints.length} sample points.`
     );
   }
+  const heightmap =
+    provider.id === "open-meteo"
+      ? normalizeCoastalWaterElevations(rawHeightmap, gridSize)
+      : rawHeightmap;
 
   return {
     accuracyStatus: provider.accuracyStatus,
@@ -532,6 +570,64 @@ export async function generateTerrainModelFromProvider(
     heightmap,
     generatedAt
   };
+}
+
+const SEA_LEVEL_EPSILON_METERS = 2;
+const CONNECTED_COASTAL_WATER_MAX_METERS = 65;
+
+function normalizeCoastalWaterElevations(heightmap: number[], gridSize: number) {
+  const normalized = [...heightmap];
+  const visited = new Set<number>();
+  const queue: number[] = [];
+  const enqueue = (index: number) => {
+    if (visited.has(index)) {
+      return;
+    }
+
+    if ((heightmap[index] ?? Number.POSITIVE_INFINITY) > SEA_LEVEL_EPSILON_METERS) {
+      return;
+    }
+
+    visited.add(index);
+    queue.push(index);
+  };
+
+  for (let index = 0; index < gridSize; index += 1) {
+    enqueue(index);
+    enqueue((gridSize - 1) * gridSize + index);
+    enqueue(index * gridSize);
+    enqueue(index * gridSize + gridSize - 1);
+  }
+
+  for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
+    const index = queue[queueIndex];
+    const x = index % gridSize;
+    const y = Math.floor(index / gridSize);
+    normalized[index] = 0;
+
+    const neighbors = [
+      x > 0 ? index - 1 : null,
+      x < gridSize - 1 ? index + 1 : null,
+      y > 0 ? index - gridSize : null,
+      y < gridSize - 1 ? index + gridSize : null
+    ];
+
+    for (const neighbor of neighbors) {
+      if (neighbor === null || visited.has(neighbor)) {
+        continue;
+      }
+
+      if (
+        (heightmap[neighbor] ?? Number.POSITIVE_INFINITY) <=
+        CONNECTED_COASTAL_WATER_MAX_METERS
+      ) {
+        visited.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  return normalized;
 }
 
 type UsgsContourFeature = {

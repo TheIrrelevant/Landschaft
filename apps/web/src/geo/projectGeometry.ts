@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Project-space geometry clipping, export, snapping, and raster world-file parsing.
- * last-updated: 2026-06-28
- * last-model: composer
- * last-change: add extent clipping, GeoJSON export, snap, and world-file helpers
+ * last-updated: 2026-06-29
+ * last-model: codex-gpt-5
+ * last-change: create raster georeference from GeoTIFF bounds
  * ---end-metadata---
  */
 import bboxClip from "@turf/bbox-clip";
@@ -131,6 +131,30 @@ export function createRasterGeoreferenceFromWorldFile(
     imageHeightPixels,
     parsedFrom: "world-file",
     worldFileSource
+  };
+}
+
+export function createRasterGeoreferenceFromMapBounds(
+  bounds: [number, number, number, number],
+  imageWidthPixels: number,
+  imageHeightPixels: number,
+  project: ProjectMetadata
+): RasterGeoreference {
+  const projectMin = mapCoordinateToProject([bounds[0], bounds[1]], project);
+  const projectMax = mapCoordinateToProject([bounds[2], bounds[3]], project);
+
+  return {
+    projectMin: [
+      Math.max(0, Math.min(projectMin[0], projectMax[0])),
+      Math.max(0, Math.min(projectMin[1], projectMax[1]))
+    ],
+    projectMax: [
+      Math.min(project.realWorldExtentMeters.width, Math.max(projectMin[0], projectMax[0])),
+      Math.min(project.realWorldExtentMeters.depth, Math.max(projectMin[1], projectMax[1]))
+    ],
+    imageWidthPixels,
+    imageHeightPixels,
+    parsedFrom: "geotiff"
   };
 }
 

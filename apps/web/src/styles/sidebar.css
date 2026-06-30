@@ -1,10 +1,10 @@
 /*
  * ---metadata---
  * type: app-style
- * description: Sidebar, orthophoto setup, and user panel styles for the Landschaft editor.
- * last-updated: 2026-06-27
+ * description: Sidebar, location data setup, and user panel styles for the Landschaft editor.
+ * last-updated: 2026-06-30
  * last-model: codex-gpt-5
- * last-change: make sidebar content scrollable
+ * last-change: style safe location search and provider dataset selection
  * ---end-metadata---
  */
 .sidebar {
@@ -194,6 +194,188 @@
   min-height: 34px;
   padding: 7px 9px;
   width: 100%;
+}
+
+.location-search {
+  align-items: center;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
+  color: var(--color-text-secondary);
+  display: flex;
+  gap: 8px;
+  min-height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.location-search input {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-primary);
+  flex: 1 1 auto;
+  font-size: 12.5px;
+  font-weight: var(--font-weight-medium);
+  min-width: 0;
+  outline: 0;
+  padding: 8px 0;
+}
+
+.location-search input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.location-results {
+  display: grid;
+  gap: 7px;
+}
+
+.location-result {
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
+  color: var(--color-text-primary);
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 26px minmax(0, 1fr);
+  min-height: 48px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.location-result.active {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-inset), var(--shadow-pressed), var(--shadow-outer-sm);
+}
+
+.location-result-icon {
+  align-items: center;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  display: flex;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.location-result-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.location-result-copy strong {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-result-copy span {
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+  font-weight: var(--font-weight-regular);
+  line-height: 1.15;
+}
+
+.safe-location-summary {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.safe-location-summary div {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-inset-soft);
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px;
+}
+
+.safe-location-summary span,
+.dataset-checklist legend {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.safe-location-summary strong {
+  color: var(--color-text-primary);
+  font-size: 11.5px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.dataset-checklist {
+  border: 0;
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.dataset-checklist legend {
+  margin-bottom: 1px;
+  padding: 0;
+}
+
+.dataset-option {
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-inset), var(--shadow-outer-sm);
+  color: var(--color-text-primary);
+  display: flex;
+  gap: 9px;
+  min-height: 34px;
+  min-width: 0;
+  padding: 7px 9px;
+}
+
+.dataset-option input {
+  accent-color: var(--color-control-active);
+  flex: 0 0 auto;
+  height: 14px;
+  margin: 0;
+  width: 14px;
+}
+
+.dataset-option span {
+  font-size: 12.5px;
+  font-weight: var(--font-weight-medium);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-import-action {
+  justify-self: stretch;
+}
+
+.import-status-error {
+  color: #9b3329;
+}
+
+.import-status-complete {
+  color: #2f6f4e;
 }
 
 .coordinate-step {

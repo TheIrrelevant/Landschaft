@@ -1,10 +1,11 @@
 /*
  * type: app-source
  * description: MCP server exposing Landschaft planning editor terrain and map tools.
- * last-updated: 2026-06-28
- * last-model: composer
- * last-change: connect map_read and map_write_draft to shared evidence builders
+ * last-updated: 2026-06-30
+ * last-model: codex-gpt-5
+ * last-change: expose safe dataset tools through MCP and a local HTTP bridge
  */
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   CodedAreaSchema,
   generateTerrainProjectAsync,
@@ -14,11 +15,25 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { handleMapRead, handleMapWriteDraft } from "./mapTools.js";
+import {
+  handleSafeDatasetImport,
+  handleSafeDatasetManifest,
+  handleSafeDatasetSearch
+} from "./safeDatasetTools.js";
 
 const server = new McpServer({
   name: "landschaft",
   version: "0.1.0"
 });
+const httpPort = Number(process.env.LANDSCHAFT_MCP_HTTP_PORT ?? 8787);
+
+const SafeDatasetIdSchema = z.enum([
+  "naip-ortho",
+  "dem-3dep",
+  "usgs-contours",
+  "hydrography",
+  "transportation"
+]);
 
 server.tool(
   "terrain_generate",
@@ -146,6 +161,113 @@ server.tool(
 );
 
 server.tool(
+  "safe_dataset_search",
+  "Search curated safe dataset locations that have reliable provider coverage.",
+  {
+    query: z.string().default("")
+  },
+  async ({ query }) => ({
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(handleSafeDatasetSearch(query), null, 2)
+      }
+    ]
+  })
+);
+
+server.tool(
+  "safe_dataset_manifest",
+  "Fetch a live provider manifest for a safe location and selected datasets.",
+  {
+    locationId: z.string(),
+    datasetIds: z.array(SafeDatasetIdSchema).optional()
+  },
+  async ({ locationId, datasetIds }) => {
+    try {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              await handleSafeDatasetManifest(locationId, datasetIds),
+              null,
+              2
+            )
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "safe_dataset_manifest failed."
+              },
+              null,
+              2
+            )
+          }
+        ],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "safe_dataset_import",
+  "Import a USA safe-location dataset through live USGS and NAIP provider APIs.",
+  {
+    locationId: z.string(),
+    datasetIds: z.array(SafeDatasetIdSchema).optional(),
+    persistAssets: z.boolean().default(true)
+  },
+  async ({ locationId, datasetIds, persistAssets }) => {
+    try {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              await handleSafeDatasetImport(locationId, datasetIds, {
+                persistAssets
+              }),
+              null,
+              2
+            )
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "safe_dataset_import failed."
+              },
+              null,
+              2
+            )
+          }
+        ],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
   "start_planning_workflow",
   "Start the area-focused planning workflow for a coded LCA area.",
   {
@@ -178,4 +300,96 @@ server.tool(
 );
 
 const transport = new StdioServerTransport();
+startHttpBridge();
 await server.connect(transport);
+
+function startHttpBridge() {
+  const httpServer = createServer(async (request, response) => {
+    response.setHeader("Access-Control-Allow-Origin", "*");
+    response.setHeader("Access-Control-Allow-Headers", "content-type");
+    response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+
+    if (request.method === "OPTIONS") {
+      response.writeHead(204);
+      response.end();
+      return;
+    }
+
+    try {
+      const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+
+      if (request.method === "GET" && url.pathname === "/safe-dataset/search") {
+        sendJson(response, handleSafeDatasetSearch(url.searchParams.get("query") ?? ""));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/safe-dataset/manifest") {
+        const body = await readJsonBody(request);
+        sendJson(
+          response,
+          await handleSafeDatasetManifest(
+            String(body.locationId ?? ""),
+            parseDatasetIds(body.datasetIds)
+          )
+        );
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/safe-dataset/import") {
+        const body = await readJsonBody(request);
+        sendJson(
+          response,
+          await handleSafeDatasetImport(
+            String(body.locationId ?? ""),
+            parseDatasetIds(body.datasetIds),
+            { persistAssets: body.persistAssets !== false }
+          )
+        );
+        return;
+      }
+
+      sendJson(response, { error: "Not found." }, 404);
+    } catch (error) {
+      sendJson(
+        response,
+        {
+          error:
+            error instanceof Error ? error.message : "Landschaft MCP HTTP bridge failed."
+        },
+        500
+      );
+    }
+  });
+
+  httpServer.listen(httpPort, "127.0.0.1");
+}
+
+function sendJson(response: ServerResponse, payload: unknown, status = 200) {
+  response.writeHead(status, { "content-type": "application/json" });
+  response.end(JSON.stringify(payload));
+}
+
+function readJsonBody(request: IncomingMessage) {
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      if (chunks.length === 0) {
+        resolve({});
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>);
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on("error", reject);
+  });
+}
+
+function parseDatasetIds(value: unknown) {
+  const result = z.array(SafeDatasetIdSchema).safeParse(value);
+  return result.success ? result.data : undefined;
+}

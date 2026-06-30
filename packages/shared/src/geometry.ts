@@ -2,9 +2,9 @@
  * ---metadata---
  * type: package-source
  * description: Project-extent geometry helpers and raster georeference contracts for Landschaft.
- * last-updated: 2026-06-28
- * last-model: composer
- * last-change: add extent bbox helpers and raster georeference schema
+ * last-updated: 2026-06-29
+ * last-model: codex-gpt-5
+ * last-change: allow GeoTIFF raster georeference metadata
  * ---end-metadata---
  */
 import { z } from "zod";
@@ -18,7 +18,7 @@ export const RasterGeoreferenceSchema = z.object({
   projectMax: ProjectCoordinateSchema,
   imageWidthPixels: z.number().positive(),
   imageHeightPixels: z.number().positive(),
-  parsedFrom: z.enum(["world-file", "project-fit"]).optional(),
+  parsedFrom: z.enum(["world-file", "geotiff", "project-fit"]).optional(),
   worldFileSource: z.string().optional()
 });
 
@@ -27,7 +27,7 @@ export interface RasterGeoreference {
   projectMax: ProjectCoordinate;
   imageWidthPixels: number;
   imageHeightPixels: number;
-  parsedFrom?: "world-file" | "project-fit";
+  parsedFrom?: "world-file" | "geotiff" | "project-fit";
   worldFileSource?: string;
 }
 

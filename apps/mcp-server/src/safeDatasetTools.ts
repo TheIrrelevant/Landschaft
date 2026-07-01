@@ -4,7 +4,7 @@
  * description: MCP handlers for USA safe-location dataset discovery and import.
  * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: keep safe imports running when TNMAccess product metadata times out
+ * last-change: clarify provider network fetch failures
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -1058,9 +1058,10 @@ async function downloadRasterExport(
   await mkdir(dirname(localPath), { recursive: true });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), rasterDownloadTimeoutMs);
+  const url = buildRasterExportUrl(location, options, "image");
 
   try {
-    const response = await fetch(buildRasterExportUrl(location, options, "image"), {
+    const response = await fetch(url, {
       signal: controller.signal
     });
     if (!response.ok || !response.body) {
@@ -1069,7 +1070,11 @@ async function downloadRasterExport(
 
     await writeFile(localPath, Buffer.from(await response.arrayBuffer()));
   } catch (error) {
-    throw formatProviderFetchError(error, "USGS raster download", rasterDownloadTimeoutMs);
+    throw formatProviderFetchError(
+      error,
+      `${url.hostname} raster download`,
+      rasterDownloadTimeoutMs
+    );
   } finally {
     clearTimeout(timeout);
   }
@@ -1522,7 +1527,15 @@ function formatProviderFetchError(
     );
   }
 
-  return error instanceof Error ? error : new Error(String(error));
+  if (error instanceof Error && error.message === "fetch failed") {
+    return new Error(
+      `${source} request failed before receiving a response. Check the network connection or retry with fewer datasets selected.`
+    );
+  }
+
+  return error instanceof Error
+    ? new Error(`${source} request failed: ${error.message}`)
+    : new Error(`${source} request failed: ${String(error)}`);
 }
 
 function bboxString(location: SafeDatasetLocation) {

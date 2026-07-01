@@ -4,7 +4,7 @@
  * description: MCP handlers for USA safe-location dataset discovery and import.
  * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: surface FEMA service failures separately from empty flood coverage
+ * last-change: keep imports running when optional raster exports fail
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -400,17 +400,19 @@ async function getDatasetManifestSource(
   const rasterExportOptions = getRasterExportOptions(datasetId);
 
   if (datasetId === "naip-ortho" && rasterExportOptions) {
+    const rasterExport = await fetchOptionalRasterExport(location, rasterExportOptions);
     return {
       datasetId,
       label: datasetLabels[datasetId],
       provider: "USGS NAIP ImageServer",
-      export: await fetchRasterExport(location, rasterExportOptions)
+      ...createRasterSourceStatus(rasterExport),
+      export: rasterExport.export
     };
   }
 
   if (datasetId === "dem-3dep" && rasterExportOptions) {
     const [rasterExport, products] = await Promise.all([
-      fetchRasterExport(location, rasterExportOptions),
+      fetchOptionalRasterExport(location, rasterExportOptions),
       fetchTnmProducts(location, datasetId).catch((error) =>
         createUnavailableTnmProducts(error)
       )
@@ -419,7 +421,8 @@ async function getDatasetManifestSource(
       datasetId,
       label: datasetLabels[datasetId],
       provider: "USGS 3DEP ImageServer / TNMAccess",
-      export: rasterExport,
+      ...createRasterSourceStatus(rasterExport),
+      export: rasterExport.export,
       total: products.total ?? 0,
       products: (products.items ?? []).slice(0, 8).map(summarizeTnmProduct),
       ...(products.unavailableReason
@@ -439,11 +442,13 @@ async function getDatasetManifestSource(
   }
 
   if (datasetId === "land-cover" && rasterExportOptions) {
+    const rasterExport = await fetchOptionalRasterExport(location, rasterExportOptions);
     return {
       datasetId,
       label: datasetLabels[datasetId],
       provider: "USGS MRLC NLCD Annual Land Cover ImageServer",
-      export: await fetchRasterExport(location, rasterExportOptions)
+      ...createRasterSourceStatus(rasterExport),
+      export: rasterExport.export
     };
   }
 
@@ -512,6 +517,29 @@ async function fetchRasterExport(
   options: RasterExportOptions
 ) {
   return fetchJson<RasterExportResponse>(buildRasterExportUrl(location, options, "json"));
+}
+
+async function fetchOptionalRasterExport(
+  location: SafeDatasetLocation,
+  options: RasterExportOptions
+) {
+  try {
+    return { export: await fetchRasterExport(location, options) };
+  } catch (error) {
+    return { unavailableReason: getErrorMessage(error) };
+  }
+}
+
+function createRasterSourceStatus(result: {
+  export?: RasterExportResponse;
+  unavailableReason?: string;
+}) {
+  return result.unavailableReason
+    ? {
+        providerStatus: "raster-unavailable",
+        unavailableReason: result.unavailableReason
+      }
+    : {};
 }
 
 async function fetchTnmProducts(
@@ -1003,7 +1031,7 @@ function createSourceReferenceLayer(
       asset
         ? `Persisted provider asset: ${asset.publicPath}.`
         : isRaster
-        ? "Provider ImageServer returned a clipped TIFF export href for this AOI."
+        ? "Provider raster asset is unavailable for this import; retry this dataset separately if the provider service recovers."
         : "Source reference returned by MCP; vector extraction worker is the next backend step.",
       `AOI: ${location.name}, ${location.region}.`
     ],
@@ -1041,7 +1069,11 @@ async function persistRasterAssets(
       continue;
     }
 
-    await downloadRasterExport(location, rasterExportOptions, localPath);
+    try {
+      await downloadRasterExport(location, rasterExportOptions, localPath);
+    } catch {
+      continue;
+    }
     const stats = await stat(localPath);
     assets.push({
       datasetId: source.datasetId,

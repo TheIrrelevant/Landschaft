@@ -4,7 +4,7 @@
  * description: Collapsible Photoshop-style layer list for the Landschaft sidebar.
  * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: show feature counts for vector provider layers
+ * last-change: update layer opacity live while typing
  * ---end-metadata---
  */
 import {
@@ -200,7 +200,10 @@ function LayerOpacityInput({
         max={100}
         min={0}
         onBlur={() => commit(draft)}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          commit(event.target.value);
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             commit(draft);

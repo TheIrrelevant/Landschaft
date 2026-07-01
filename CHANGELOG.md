@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-01
 last-model: codex-gpt-5
-last-change: log FEMA coverage unavailable status
+last-change: log soil fill colormap and live opacity updates
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Filled soil polygons with deterministic soil-type colors and made layer opacity update live while editing the opacity input.
 - Surface FEMA NFHL service failures separately from valid empty flood coverage so `0 features` no longer hides provider connectivity failures.
 - Changed safe dataset completion status to report provider layers, vector features, and raster assets instead of only raster asset count.
 - Replaced raw provider `fetch failed` messages with source-specific network failure guidance.

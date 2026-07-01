@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: drape land-cover rasters and lift polygon overlays above terrain
+ * last-change: fill soil polygons with deterministic soil-type colors
  * ---end-metadata---
  */
 import {
@@ -28,8 +28,10 @@ import {
   DoubleSide, FrontSide,
   Float32BufferAttribute,
   RepeatWrapping,
+  ShapeUtils,
   SRGBColorSpace,
   TextureLoader,
+  Vector2,
   type Texture
 } from "three";
 import * as THREE from "three/webgpu";
@@ -111,6 +113,20 @@ const TERRAIN_DRAPED_RASTER_LAYER_IDS = new Set([
   "safe-data-dem-3dep",
   "safe-data-land-cover"
 ]);
+const SOIL_COLOR_PALETTE = [
+  "#b89655",
+  "#8fb56a",
+  "#c7885f",
+  "#d1b76a",
+  "#87a982",
+  "#b98f78",
+  "#9f9a63",
+  "#c2a173",
+  "#7fa18f",
+  "#d0a85c",
+  "#a7b86c",
+  "#b47c5f"
+];
 
 /**
  * The terrain coordinate space.
@@ -1510,42 +1526,78 @@ function FeatureOverlay({
       ),
     [feature, project, projectSpace, terrain, terrainSpace, terrainGenerated, lift]
   );
+  const polygonFillGeometry = useMemo(
+    () =>
+      feature.geometryType === "polygon"
+        ? buildPolygonFillGeometry(
+            feature,
+            project,
+            projectSpace,
+            terrain,
+            terrainSpace,
+            terrainGenerated,
+            lift - LAYER_STACK_LIFT_STEP * 0.18
+          )
+        : null,
+    [feature, project, projectSpace, terrain, terrainSpace, terrainGenerated, lift]
+  );
   const setHoveredFeature = useEditorStore((state) => state.setHoveredFeature);
 
   if (!geometry) {
     return null;
   }
 
+  const handleClick = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
+    selectFeatureInLayer(layer.id, feature.id);
+  };
+  const handlePointerOut = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
+    document.body.style.cursor = "";
+    setHoveredFeature(null, null);
+  };
+  const handlePointerOver = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
+    document.body.style.cursor = "pointer";
+    setHoveredFeature(layer.id, feature.id);
+  };
+  const fillColor = getFeatureFillColor(layer, feature);
+  const strokeColor = getFeatureStrokeColor(layer, feature);
+
   return (
-    <lineSegments
-      geometry={geometry}
+    <group
       renderOrder={renderOrder}
-      onClick={(event) => {
-        event.stopPropagation();
-        selectFeatureInLayer(layer.id, feature.id);
-      }}
-      onPointerOut={(event) => {
-        event.stopPropagation();
-        document.body.style.cursor = "";
-        setHoveredFeature(null, null);
-      }}
-      onPointerOver={(event) => {
-        event.stopPropagation();
-        document.body.style.cursor = "pointer";
-        setHoveredFeature(layer.id, feature.id);
-      }}
+      onClick={handleClick}
+      onPointerOut={handlePointerOut}
+      onPointerOver={handlePointerOver}
     >
-      <lineBasicMaterial
-        clippingPlanes={clippingPlanes}
-        clipIntersection={false}
-        color={layer.style?.stroke ?? "#2f6f4e"}
-        depthTest={false}
-        depthWrite={false}
-        linewidth={layer.style?.strokeWidth ?? 2}
-        opacity={layer.opacity}
-        transparent
-      />
-    </lineSegments>
+      {polygonFillGeometry ? (
+        <mesh geometry={polygonFillGeometry} renderOrder={renderOrder}>
+          <meshBasicNodeMaterial
+            clippingPlanes={clippingPlanes}
+            clipIntersection={false}
+            color={new Color(fillColor)}
+            depthTest={false}
+            depthWrite={false}
+            opacity={Math.min(0.72, Math.max(0.18, layer.opacity * 0.62))}
+            side={DoubleSide}
+            transparent
+          />
+        </mesh>
+      ) : null}
+      <lineSegments geometry={geometry} renderOrder={renderOrder + 1}>
+        <lineBasicMaterial
+          clippingPlanes={clippingPlanes}
+          clipIntersection={false}
+          color={strokeColor}
+          depthTest={false}
+          depthWrite={false}
+          linewidth={layer.style?.strokeWidth ?? 2}
+          opacity={Math.min(1, Math.max(0.24, layer.opacity))}
+          transparent
+        />
+      </lineSegments>
+    </group>
   );
 }
 
@@ -1714,6 +1766,51 @@ function buildVectorFeatureGeometry(
   return geometry;
 }
 
+function buildPolygonFillGeometry(
+  feature: NonNullable<PlanningLayer["features"]>[number],
+  project: ProjectMetadata,
+  projectSpace: ProjectSpace,
+  terrain: TerrainModel,
+  terrainSpace: TerrainSpace,
+  terrainGenerated: boolean,
+  lift: number
+) {
+  const coordinates = removeClosingCoordinate(feature.coordinates);
+  if (coordinates.length < 3) {
+    return null;
+  }
+
+  const scenePoints = coordinates.map((coordinate) =>
+    projectCoordinateToScene(
+      coordinate,
+      project,
+      projectSpace,
+      terrain,
+      terrainSpace,
+      terrainGenerated,
+      lift
+    )
+  );
+  const shapePoints = scenePoints.map((point) => new Vector2(point[0], point[2]));
+  const triangles = ShapeUtils.triangulateShape(shapePoints, []);
+  const positions: number[] = [];
+
+  for (const triangle of triangles) {
+    for (const pointIndex of triangle) {
+      const point = scenePoints[pointIndex];
+      positions.push(point[0], point[1], point[2]);
+    }
+  }
+
+  if (positions.length === 0) {
+    return null;
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  return geometry;
+}
+
 function closeRing(coordinates: Coordinate[]) {
   const first = coordinates[0];
   const last = coordinates[coordinates.length - 1];
@@ -1722,6 +1819,69 @@ function closeRing(coordinates: Coordinate[]) {
   }
 
   return [...coordinates, first];
+}
+
+function removeClosingCoordinate(coordinates: Coordinate[]) {
+  const first = coordinates[0];
+  const last = coordinates[coordinates.length - 1];
+  if (!first || !last || first[0] !== last[0] || first[1] !== last[1]) {
+    return coordinates;
+  }
+
+  return coordinates.slice(0, -1);
+}
+
+function getFeatureFillColor(
+  layer: PlanningLayer,
+  feature: NonNullable<PlanningLayer["features"]>[number]
+) {
+  if (layer.id === "safe-data-soil") {
+    return getSoilFeatureColor(feature);
+  }
+
+  return layer.style?.fill ?? "#4aa3cf";
+}
+
+function getFeatureStrokeColor(
+  layer: PlanningLayer,
+  feature: NonNullable<PlanningLayer["features"]>[number]
+) {
+  if (layer.id === "safe-data-soil") {
+    return darkenHex(getSoilFeatureColor(feature), 0.28);
+  }
+
+  return layer.style?.stroke ?? "#2f6f4e";
+}
+
+function getSoilFeatureColor(feature: NonNullable<PlanningLayer["features"]>[number]) {
+  const key =
+    feature.attributes?.musym ??
+    feature.attributes?.nationalmusym ??
+    feature.attributes?.mukey ??
+    feature.label;
+  return SOIL_COLOR_PALETTE[hashString(String(key)) % SOIL_COLOR_PALETTE.length];
+}
+
+function hashString(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function darkenHex(hex: string, amount: number) {
+  const normalized = hex.replace("#", "");
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return `#${[red, green, blue]
+    .map((channel) =>
+      Math.round(channel * (1 - amount))
+        .toString(16)
+        .padStart(2, "0")
+    )
+    .join("")}`;
 }
 
 function projectCoordinateToScene(

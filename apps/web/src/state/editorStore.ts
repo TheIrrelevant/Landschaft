@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: expose soil, land-cover, and flood-hazard safe dataset selections
+ * last-change: report imported layers and feature counts in safe dataset status
  * ---end-metadata---
  */
 import {
@@ -1652,7 +1652,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         terrainGenerationError: null,
         terrainHeightSource: "open-meteo" as const,
         safeDatasetImportStatus: "complete" as const,
-        safeDatasetImportMessage: `Imported ${result.assets?.length ?? 0} provider assets through the MCP backend.`,
+        safeDatasetImportMessage: summarizeSafeDatasetImport(result),
         inspectorOpen: false,
         coordinateStep: 4
       };
@@ -1755,6 +1755,17 @@ async function fetchSafeDatasetImport(
   }
 
   return (await response.json()) as SafeDatasetBackendImportResult;
+}
+
+function summarizeSafeDatasetImport(result: SafeDatasetBackendImportResult) {
+  const providerLayers = result.layers.filter((layer) => layer.id !== "terrain-mesh");
+  const featureCount = providerLayers.reduce(
+    (total, layer) => total + (layer.features?.length ?? 0),
+    0
+  );
+  const assetCount = result.assets?.length ?? 0;
+
+  return `Imported ${providerLayers.length} provider layers, ${featureCount} vector features, and ${assetCount} raster assets through the MCP backend.`;
 }
 
 type GeoJsonPayload = {

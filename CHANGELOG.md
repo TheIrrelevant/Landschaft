@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-01
 last-model: codex-gpt-5
-last-change: log clearer provider network errors
+last-change: log clearer safe dataset import completion summary
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Changed safe dataset completion status to report provider layers, vector features, and raster assets instead of only raster asset count.
 - Replaced raw provider `fetch failed` messages with source-specific network failure guidance.
 - Added layer-list feature counts for vector provider layers and FEMA zone notes so empty or boundary-only flood layers are easier to interpret.
 - Draped NLCD land-cover rasters onto terrain with categorical land-cover colors and lifted polygon overlays so soil boundaries render above raster layers.

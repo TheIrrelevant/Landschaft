@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-01
 last-model: codex-gpt-5
-last-change: log land-cover draping and polygon overlay visibility fixes
+last-change: log provider feature counts and FEMA zone notes
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Added layer-list feature counts for vector provider layers and FEMA zone notes so empty or boundary-only flood layers are easier to interpret.
 - Draped NLCD land-cover rasters onto terrain with categorical land-cover colors and lifted polygon overlays so soil boundaries render above raster layers.
 - Kept safe dataset imports running when TNMAccess product metadata times out, while still surfacing provider metadata status in the manifest.
 - Added USDA soils, NLCD land cover, and FEMA flood hazard options to the safe dataset import flow.

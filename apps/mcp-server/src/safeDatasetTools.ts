@@ -947,7 +947,10 @@ function createFloodHazardLayer(
     legend: [{ label: "NFHL flood hazard zone", color: "#b874a8" }],
     features,
     planningImpactNotes: [
-      `${features.length} flood hazard polygons imported from FEMA NFHL.`,
+      features.length > 0
+        ? `${features.length} flood hazard polygons imported from FEMA NFHL.`
+        : "No FEMA NFHL flood hazard polygons intersected this AOI; the layer is retained as a source-coverage record.",
+      "FEMA zones A, AE, AO, AH, and VE indicate mapped high-risk flood hazard areas; Zone X indicates lower or minimal mapped flood risk.",
       `Target processing CRS: ${location.targetCrs}.`
     ],
     locked: true

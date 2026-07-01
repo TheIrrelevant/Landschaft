@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Collapsible Photoshop-style layer list for the Landschaft sidebar.
- * last-updated: 2026-06-29
+ * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: replace opacity preset dropdown with 0-100 number input
+ * last-change: show feature counts for vector provider layers
  * ---end-metadata---
  */
 import {
@@ -216,7 +216,12 @@ function LayerOpacityInput({
   );
 }
 
-function getLayerTypeLabel(layer: { kind: string; category?: string; geometryType?: string }) {
+function getLayerTypeLabel(layer: {
+  features?: unknown[];
+  kind: string;
+  category?: string;
+  geometryType?: string;
+}) {
   if (layer.kind === "orthophoto") {
     return "Image";
   }
@@ -226,9 +231,14 @@ function getLayerTypeLabel(layer: { kind: string; category?: string; geometryTyp
   }
 
   if (layer.kind === "foundational-map") {
-    return `${formatLabel(layer.category ?? "foundational")} / ${
+    const baseLabel = `${formatLabel(layer.category ?? "foundational")} / ${
       layer.geometryType ?? "mixed"
     }`;
+    if (!layer.features || layer.geometryType === "raster") {
+      return baseLabel;
+    }
+
+    return `${baseLabel} / ${layer.features.length} features`;
   }
 
   if (layer.kind === "lca") {

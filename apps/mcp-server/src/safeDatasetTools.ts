@@ -966,7 +966,7 @@ function createSourceReferenceLayer(
     name: datasetLabels[datasetId],
     kind: datasetId === "naip-ortho" ? "orthophoto" : "foundational-map",
     visible: true,
-    opacity: isRaster ? 1 : 0.68,
+    opacity: getDefaultProviderLayerOpacity(datasetId),
     reviewStatus: "draft",
     category: getLayerCategory(datasetId),
     geometryType: isRaster ? "raster" : "mixed",
@@ -1578,6 +1578,13 @@ function getLayerColor(datasetId: SafeDatasetId) {
 
 function isRasterDataset(datasetId: SafeDatasetId) {
   return datasetId === "naip-ortho" || datasetId === "dem-3dep" || datasetId === "land-cover";
+}
+
+function getDefaultProviderLayerOpacity(datasetId: SafeDatasetId) {
+  if (datasetId === "land-cover") {
+    return 0.72;
+  }
+  return isRasterDataset(datasetId) ? 1 : 0.68;
 }
 
 function safeRatio(numerator: number, denominator: number) {

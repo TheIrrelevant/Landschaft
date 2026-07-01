@@ -647,7 +647,7 @@ function createSafeDatasetLayers(
       name: dataset.label,
       kind: datasetId === "naip-ortho" ? "orthophoto" : "foundational-map",
       visible: true,
-      opacity: isSafeDatasetRaster(datasetId) ? 1 : 0.68,
+      opacity: getDefaultSafeDatasetOpacity(datasetId),
       reviewStatus: "draft",
       category: dataset.category,
       geometryType: isSafeDatasetRaster(datasetId)
@@ -706,6 +706,13 @@ function getSafeDatasetColor(datasetId: SafeDatasetId) {
 
 function isSafeDatasetRaster(datasetId: SafeDatasetId) {
   return datasetId === "naip-ortho" || datasetId === "dem-3dep" || datasetId === "land-cover";
+}
+
+function getDefaultSafeDatasetOpacity(datasetId: SafeDatasetId) {
+  if (datasetId === "land-cover") {
+    return 0.72;
+  }
+  return isSafeDatasetRaster(datasetId) ? 1 : 0.68;
 }
 
 function createTerrainRequest(

@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: remove unused raster helper functions after compositing cleanup
+ * last-change: drape land-cover rasters and lift polygon overlays above terrain
  * ---end-metadata---
  */
 import {
@@ -107,6 +107,10 @@ const LAYER_STACK_LIFT_STEP = 0.035;
 const VECTOR_OVERLAY_LIFT_BONUS = 0.08;
 /** Only 100% opacity fully masks raster layers below in the stack. */
 const FULL_LAYER_OPACITY = 1;
+const TERRAIN_DRAPED_RASTER_LAYER_IDS = new Set([
+  "safe-data-dem-3dep",
+  "safe-data-land-cover"
+]);
 
 /**
  * The terrain coordinate space.
@@ -683,10 +687,20 @@ function isOrthophotoGeoTiffUrl(url: string) {
   return /naip-ortho|orthophoto/i.test(url);
 }
 
+function isLandCoverGeoTiffUrl(url: string) {
+  return /land-cover|nlcd/i.test(url);
+}
+
 async function loadGeoTiffTexture(url: string) {
-  return isOrthophotoGeoTiffUrl(url)
-    ? loadGeoTiffRgbTexture(url)
-    : loadGeoTiffScalarTexture(url);
+  if (isOrthophotoGeoTiffUrl(url)) {
+    return loadGeoTiffRgbTexture(url);
+  }
+
+  if (isLandCoverGeoTiffUrl(url)) {
+    return loadGeoTiffLandCoverTexture(url);
+  }
+
+  return loadGeoTiffScalarTexture(url);
 }
 
 async function loadGeoTiffRgbTexture(url: string) {
@@ -776,6 +790,68 @@ function elevationToDivergingRgb(
   }
 
   return lerpRgb(green, red, tone);
+}
+
+const NLCD_LAND_COVER_COLORS: Record<number, [number, number, number, number]> = {
+  11: [70, 107, 159, 220],
+  12: [209, 222, 248, 220],
+  21: [222, 197, 197, 210],
+  22: [217, 146, 130, 215],
+  23: [235, 0, 0, 215],
+  24: [171, 0, 0, 215],
+  31: [179, 172, 159, 210],
+  41: [104, 171, 95, 220],
+  42: [28, 95, 44, 220],
+  43: [181, 197, 143, 220],
+  52: [204, 184, 121, 215],
+  71: [223, 223, 194, 205],
+  81: [220, 217, 57, 205],
+  82: [171, 108, 40, 205],
+  90: [184, 217, 235, 220],
+  95: [108, 159, 184, 220]
+};
+
+async function loadGeoTiffLandCoverTexture(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`GeoTIFF texture request failed: ${response.status}`);
+  }
+
+  const tiff = await fromArrayBuffer(await response.arrayBuffer());
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const raster = (await image.readRasters({
+    interleave: true,
+    samples: [0]
+  })) as ArrayLike<number>;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("GeoTIFF texture canvas could not be created.");
+  }
+
+  const imageData = context.createImageData(width, height);
+  for (let index = 0; index < width * height; index += 1) {
+    const value = Number(raster[index]);
+    const [red, green, blue, alpha] =
+      NLCD_LAND_COVER_COLORS[value] ?? ([104, 112, 106, 160] as const);
+    const offset = index * 4;
+    imageData.data[offset] = red;
+    imageData.data[offset + 1] = green;
+    imageData.data[offset + 2] = blue;
+    imageData.data[offset + 3] = value > 0 ? alpha : 0;
+  }
+  context.putImageData(imageData, 0, 0);
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.flipY = true;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 async function loadGeoTiffScalarTexture(url: string) {
@@ -1156,7 +1232,7 @@ function isFullCoverageLayer(layer: PlanningLayer, terrainGenerated: boolean) {
   return (
     (terrainGenerated &&
       Boolean(layer.rasterGeoreference) &&
-      (layer.kind === "orthophoto" || layer.id === "safe-data-dem-3dep")) ||
+      (layer.kind === "orthophoto" || TERRAIN_DRAPED_RASTER_LAYER_IDS.has(layer.id))) ||
     Boolean(layer.rasterGeoreference)
   );
 }
@@ -1193,7 +1269,7 @@ function shouldDrapeRasterLayer(layer: PlanningLayer, terrainGenerated: boolean)
     layer.geometryType === "raster" &&
     Boolean(layer.rasterGeoreference) &&
     Boolean(layer.rasterPreviewUrl) &&
-    (layer.kind === "orthophoto" || layer.id === "safe-data-dem-3dep")
+    (layer.kind === "orthophoto" || TERRAIN_DRAPED_RASTER_LAYER_IDS.has(layer.id))
   );
 }
 
@@ -1310,7 +1386,9 @@ function FoundationalLayerContent({
   const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
   const stackLift = getLayerStackLift(layers, layer.id);
   const lift =
-    layer.geometryType === "line" || layer.geometryType === "mixed"
+    layer.geometryType === "line" ||
+    layer.geometryType === "mixed" ||
+    layer.geometryType === "polygon"
       ? getVectorLayerLift(layers, layer.id)
       : stackLift;
   const clippingPlanes = useMemo(
@@ -1501,7 +1579,11 @@ function LayeredSceneContent() {
   const activeDrapedTexture = useOrthophotoTexture(
     activeDrapedRaster?.rasterPreviewUrl ?? null
   );
-  const hideTerrainSurface = Boolean(activeDrapedRaster && activeDrapedTexture);
+  const hideTerrainSurface = Boolean(
+    activeDrapedRaster &&
+      activeDrapedTexture &&
+      isFullyOpaqueLayer(activeDrapedRaster)
+  );
   const compositeLayers = getLayersInCompositeOrder(layers);
 
   return (

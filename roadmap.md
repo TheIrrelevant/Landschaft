@@ -1,9 +1,9 @@
 ---
 type: roadmap
 description: Product roadmap for the Landschaft web-based landscape planning editor.
-last-updated: 2026-06-28
+last-updated: 2026-07-01
 last-model: codex-gpt-5
-last-change: record checkpoint 3 draft LCA workflow progress
+last-change: add deployment roadmap for GitHub Pages and hosted MCP backend
 ---
 
 # Landschaft Roadmap
@@ -3376,3 +3376,37 @@ Out of scope for the first version:
 - Each design feature stores rationale, evidence, confidence, and review status.
 - Users can inspect, edit, approve, or reject generated concept and masterplan features.
 - The concept and masterplan outputs remain traceable to the full analysis and planning chain.
+
+## 10. Hosted Deployment And Public Preview
+
+### Goal
+
+Publish Landschaft as a browser-accessible preview so the editor can be tested without running the local development server.
+
+### Deployment Model
+
+Use GitHub Pages for the static Vite frontend and deploy the MCP HTTP bridge separately, because GitHub Pages cannot run server-side MCP code.
+
+Required pieces:
+
+- GitHub Pages workflow for `apps/web/dist`.
+- Vite project-site base path for `/Landschaft/`.
+- Hosted MCP HTTP bridge on a server platform such as Render, Fly, Railway, or a VPS.
+- Production `VITE_LANDSCHAFT_MCP_HTTP_URL` pointing the frontend to the hosted MCP bridge.
+- CORS configuration on the MCP HTTP bridge for the GitHub Pages origin.
+- Clear fallback messaging when the backend is unavailable.
+
+### Open Decisions
+
+- Whether the repository remains private or becomes public for GitHub Pages eligibility.
+- Which platform hosts the MCP HTTP bridge.
+- Whether provider raster assets should be cached in the hosted backend, object storage, or regenerated per import.
+- Whether the public preview is open to everyone or protected behind access control.
+
+### Acceptance Criteria
+
+- The frontend is published from GitHub Pages.
+- The published frontend loads static assets correctly under the `/Landschaft/` base path.
+- Safe dataset import works against a hosted MCP HTTP bridge.
+- The deployed app can import provider layers without requiring `localhost`.
+- Deployment steps are documented and repeatable through GitHub Actions.

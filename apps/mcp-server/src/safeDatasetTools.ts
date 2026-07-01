@@ -4,7 +4,7 @@
  * description: MCP handlers for USA safe-location dataset discovery and import.
  * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: clarify provider network fetch failures
+ * last-change: surface FEMA service failures separately from empty flood coverage
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -68,6 +68,11 @@ interface TnmProductsResponse {
 }
 
 type TnmProductsResult = TnmProductsResponse & {
+  unavailableReason?: string;
+};
+
+type ProviderFeatureResult<T> = {
+  features: T[];
   unavailableReason?: string;
 };
 
@@ -279,7 +284,7 @@ export async function handleSafeDatasetImport(
     hydroFeatures,
     transportFeatures,
     soilFeatures,
-    floodFeatures
+    floodResult
   ] =
     await Promise.all([
       handleSafeDatasetManifest(location.id, selectedDatasetIds),
@@ -297,8 +302,13 @@ export async function handleSafeDatasetImport(
         ? fetchSoilFeatures(location, 120).catch(() => [])
         : Promise.resolve([]),
       selectedDatasetIds.includes("flood-hazard")
-        ? fetchFloodHazardFeatures(location, 300).catch(() => [])
-        : Promise.resolve([])
+        ? fetchFloodHazardFeatures(location, 300)
+            .then((features) => ({ features }))
+            .catch((error) => ({
+              features: [],
+              unavailableReason: getErrorMessage(error)
+            }))
+        : Promise.resolve({ features: [] })
     ]);
   const assets =
     options.persistAssets === false
@@ -312,7 +322,7 @@ export async function handleSafeDatasetImport(
     hydroFeatures,
     transportFeatures,
     soilFeatures,
-    floodFeatures,
+    floodResult,
     assets
   );
   const baseLayers = terrainResult.baseLayers.filter(
@@ -533,11 +543,12 @@ function createUnavailableTnmProducts(error: unknown): TnmProductsResult {
   return {
     total: 0,
     items: [],
-    unavailableReason:
-      error instanceof Error
-        ? error.message
-        : "TNMAccess product metadata is unavailable."
+    unavailableReason: getErrorMessage(error)
   };
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function fetchContourCount(location: SafeDatasetLocation) {
@@ -731,7 +742,7 @@ function createProviderLayers(
   hydroFeatures: HydroFeature[],
   transportFeatures: Array<{ kind: string; feature: TransportFeature }>,
   soilFeatures: PolygonFeature[],
-  floodFeatures: PolygonFeature[],
+  floodResult: ProviderFeatureResult<PolygonFeature>,
   assets: PersistedRasterAsset[]
 ): PlanningLayer[] {
   return datasetIds.map((datasetId) => {
@@ -752,7 +763,7 @@ function createProviderLayers(
     }
 
     if (datasetId === "flood-hazard") {
-      return createFloodHazardLayer(project, location, floodFeatures);
+      return createFloodHazardLayer(project, location, floodResult);
     }
 
     return createSourceReferenceLayer(
@@ -916,9 +927,9 @@ function createSoilLayer(
 function createFloodHazardLayer(
   project: ProjectMetadata,
   location: SafeDatasetLocation,
-  floodFeatures: PolygonFeature[]
+  floodResult: ProviderFeatureResult<PolygonFeature>
 ): PlanningLayer {
-  const features = floodFeatures.flatMap((feature, featureIndex) =>
+  const features = floodResult.features.flatMap((feature, featureIndex) =>
     polygonFeatureToVectorFeatures(
       project,
       feature,
@@ -947,7 +958,9 @@ function createFloodHazardLayer(
     legend: [{ label: "NFHL flood hazard zone", color: "#b874a8" }],
     features,
     planningImpactNotes: [
-      features.length > 0
+      floodResult.unavailableReason
+        ? `FEMA NFHL coverage could not be checked for this AOI: ${floodResult.unavailableReason}`
+        : features.length > 0
         ? `${features.length} flood hazard polygons imported from FEMA NFHL.`
         : "No FEMA NFHL flood hazard polygons intersected this AOI; the layer is retained as a source-coverage record.",
       "FEMA zones A, AE, AO, AH, and VE indicate mapped high-risk flood hazard areas; Zone X indicates lower or minimal mapped flood risk.",

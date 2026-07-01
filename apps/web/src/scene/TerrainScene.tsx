@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Three.js terrain preview scene for the Landschaft editor.
- * last-updated: 2026-06-30
+ * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: fix draped raster opacity compositing without depth-buffer dropout
+ * last-change: remove unused raster helper functions after compositing cleanup
  * ---end-metadata---
  */
 import {
@@ -853,14 +853,6 @@ function getRasterDisplayRange(raster: ArrayLike<number>, stride: number) {
   };
 }
 
-function normalizeRasterTone(value: number, min: number, max: number) {
-  if (!Number.isFinite(value) || value <= -9999) {
-    return 0;
-  }
-
-  return Math.round(Math.min(Math.max((value - min) / (max - min), 0), 1) * 255);
-}
-
 function TerrainMesh({
   hideTopSurface,
   terrain,
@@ -1146,10 +1138,6 @@ function getLayerStackLift(layers: PlanningLayer[], layerId: string) {
 
 function getVectorLayerLift(layers: PlanningLayer[], layerId: string) {
   return getLayerStackLift(layers, layerId) + VECTOR_OVERLAY_LIFT_BONUS;
-}
-
-function isElevationColormapLayer(layer: PlanningLayer) {
-  return layer.id === "safe-data-dem-3dep";
 }
 
 function getDrapedRasterMaterialOpacity(layer: PlanningLayer) {

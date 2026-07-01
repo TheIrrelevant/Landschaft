@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Zustand store for Landschaft editor layers and selected area state.
- * last-updated: 2026-06-30
+ * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: stop auto-creating project boundary layer on import
+ * last-change: expose soil, land-cover, and flood-hazard safe dataset selections
  * ---end-metadata---
  */
 import {
@@ -43,7 +43,10 @@ type SafeDatasetId =
   | "dem-3dep"
   | "usgs-contours"
   | "hydrography"
-  | "transportation";
+  | "transportation"
+  | "soil"
+  | "land-cover"
+  | "flood-hazard";
 type SafeDatasetImportStatus = "idle" | "ready" | "importing" | "complete" | "error";
 const safeDatasetBridgeUrl =
   import.meta.env.VITE_LANDSCHAFT_MCP_HTTP_URL ?? "http://127.0.0.1:8787";
@@ -203,6 +206,21 @@ const safeDatasetCatalog: Record<
     label: "Transportation",
     provider: "USGS National Map Transportation",
     category: "infrastructure-utilities"
+  },
+  soil: {
+    label: "USDA soils",
+    provider: "USDA NRCS Soil Data Access",
+    category: "soil"
+  },
+  "land-cover": {
+    label: "NLCD land cover",
+    provider: "USGS MRLC NLCD",
+    category: "ecology-vegetation"
+  },
+  "flood-hazard": {
+    label: "FEMA flood hazard",
+    provider: "FEMA National Flood Hazard Layer",
+    category: "risk-suitability"
   }
 };
 
@@ -219,13 +237,16 @@ const safeDatasetLocations: SafeDatasetLocation[] = [
       north: 40.028
     },
     targetCrs: "EPSG:26913",
-    dataSource: "USGS The National Map / NAIP",
+    dataSource: "USGS The National Map / NAIP / USDA NRCS / FEMA",
     datasets: [
       "naip-ortho",
       "dem-3dep",
       "usgs-contours",
       "hydrography",
-      "transportation"
+      "transportation",
+      "soil",
+      "land-cover",
+      "flood-hazard"
     ]
   }
 ];
@@ -626,13 +647,15 @@ function createSafeDatasetLayers(
       name: dataset.label,
       kind: datasetId === "naip-ortho" ? "orthophoto" : "foundational-map",
       visible: true,
-      opacity: datasetId === "naip-ortho" || datasetId === "dem-3dep" ? 1 : 0.68,
+      opacity: isSafeDatasetRaster(datasetId) ? 1 : 0.68,
       reviewStatus: "draft",
       category: dataset.category,
-      geometryType: datasetId === "naip-ortho" || datasetId === "dem-3dep"
+      geometryType: isSafeDatasetRaster(datasetId)
         ? "raster"
         : datasetId === "usgs-contours" || datasetId === "transportation"
         ? "line"
+        : datasetId === "soil" || datasetId === "flood-hazard"
+        ? "polygon"
         : "mixed",
       source: {
         sourceName: `${dataset.provider} / ${location.name}`,
@@ -670,9 +693,19 @@ function getSafeDatasetColor(datasetId: SafeDatasetId) {
       return "#367aa2";
     case "transportation":
       return "#5a5f66";
+    case "soil":
+      return "#b89655";
+    case "land-cover":
+      return "#5d8c4a";
+    case "flood-hazard":
+      return "#b874a8";
     default:
       return "#68706a";
   }
+}
+
+function isSafeDatasetRaster(datasetId: SafeDatasetId) {
+  return datasetId === "naip-ortho" || datasetId === "dem-3dep" || datasetId === "land-cover";
 }
 
 function createTerrainRequest(

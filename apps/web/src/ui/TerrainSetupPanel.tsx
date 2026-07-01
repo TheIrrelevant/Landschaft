@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Safe location search and dataset selection panel for provider-backed imports.
- * last-updated: 2026-06-30
+ * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: replace orthophoto coordinate setup with safe dataset location search
+ * last-change: show expanded safe dataset labels for soil, land-cover, and flood-hazard
  * ---end-metadata---
  */
 import {
@@ -23,7 +23,10 @@ const datasetLabels = {
   "dem-3dep": "3DEP DEM",
   "usgs-contours": "USGS contours",
   hydrography: "Hydrography",
-  transportation: "Transportation"
+  transportation: "Transportation",
+  soil: "USDA soils",
+  "land-cover": "NLCD land cover",
+  "flood-hazard": "FEMA flood hazard"
 } as const;
 
 export function TerrainSetupPanel() {

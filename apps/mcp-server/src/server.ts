@@ -1,9 +1,9 @@
 /*
  * type: app-source
  * description: MCP server exposing Landschaft planning editor terrain and map tools.
- * last-updated: 2026-06-30
+ * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: keep MCP stdio alive when the optional HTTP bridge port is busy
+ * last-change: add soil, land-cover, and flood-hazard safe dataset ids
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
@@ -32,7 +32,10 @@ const SafeDatasetIdSchema = z.enum([
   "dem-3dep",
   "usgs-contours",
   "hydrography",
-  "transportation"
+  "transportation",
+  "soil",
+  "land-cover",
+  "flood-hazard"
 ]);
 
 server.tool(

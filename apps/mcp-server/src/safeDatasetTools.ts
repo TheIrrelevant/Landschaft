@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: MCP handlers for USA safe-location dataset discovery and import.
- * last-updated: 2026-06-30
+ * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: paginate transportation import so local roads and trails are not capped
+ * last-change: import soil, land-cover, and flood-hazard safe datasets
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -25,7 +25,10 @@ export type SafeDatasetId =
   | "dem-3dep"
   | "usgs-contours"
   | "hydrography"
-  | "transportation";
+  | "transportation"
+  | "soil"
+  | "land-cover"
+  | "flood-hazard";
 
 interface SafeDatasetLocation {
   id: string;
@@ -135,6 +138,17 @@ interface TransportResponse {
   features?: TransportFeature[];
 }
 
+interface PolygonFeature {
+  attributes?: Record<string, string | number | null | undefined>;
+  geometry?: {
+    rings?: ArcGisPoint[][] | number[][][];
+  };
+}
+
+interface PolygonResponse {
+  features?: PolygonFeature[];
+}
+
 const transportLayerConfig = [
   { layerId: 29, kind: "highway" },
   { layerId: 30, kind: "secondary-highway" },
@@ -163,13 +177,16 @@ const safeDatasetLocations: SafeDatasetLocation[] = [
       north: 40.028
     },
     targetCrs: "EPSG:26913",
-    dataSource: "USGS The National Map / NAIP",
+    dataSource: "USGS The National Map / NAIP / USDA NRCS / FEMA",
     datasets: [
       "naip-ortho",
       "dem-3dep",
       "usgs-contours",
       "hydrography",
-      "transportation"
+      "transportation",
+      "soil",
+      "land-cover",
+      "flood-hazard"
     ]
   }
 ];
@@ -179,7 +196,10 @@ const datasetLabels: Record<SafeDatasetId, string> = {
   "dem-3dep": "3DEP DEM",
   "usgs-contours": "USGS contours",
   hydrography: "Hydrography",
-  transportation: "Transportation"
+  transportation: "Transportation",
+  soil: "USDA soils",
+  "land-cover": "NLCD land cover",
+  "flood-hazard": "FEMA flood hazard"
 };
 
 const tnmDatasets: Partial<Record<SafeDatasetId, string[]>> = {
@@ -248,7 +268,15 @@ export async function handleSafeDatasetImport(
       ? "usgs-contours"
       : "open-meteo"
   };
-  const [manifest, terrainResult, contourFeatures, hydroFeatures, transportFeatures] =
+  const [
+    manifest,
+    terrainResult,
+    contourFeatures,
+    hydroFeatures,
+    transportFeatures,
+    soilFeatures,
+    floodFeatures
+  ] =
     await Promise.all([
       handleSafeDatasetManifest(location.id, selectedDatasetIds),
       generateTerrainProjectAsync(terrainRequest),
@@ -260,6 +288,12 @@ export async function handleSafeDatasetImport(
         : Promise.resolve([]),
       selectedDatasetIds.includes("transportation")
         ? fetchTransportationFeatures(location).catch(() => [])
+        : Promise.resolve([]),
+      selectedDatasetIds.includes("soil")
+        ? fetchSoilFeatures(location, 120).catch(() => [])
+        : Promise.resolve([]),
+      selectedDatasetIds.includes("flood-hazard")
+        ? fetchFloodHazardFeatures(location, 300).catch(() => [])
         : Promise.resolve([])
     ]);
   const assets =
@@ -273,6 +307,8 @@ export async function handleSafeDatasetImport(
     contourFeatures,
     hydroFeatures,
     transportFeatures,
+    soilFeatures,
+    floodFeatures,
     assets
   );
   const baseLayers = terrainResult.baseLayers.filter(
@@ -329,6 +365,17 @@ function getRasterExportOptions(datasetId: SafeDatasetId) {
     };
   }
 
+  if (datasetId === "land-cover") {
+    return {
+      serviceUrl:
+        "https://di-nlcd.img.arcgis.com/arcgis/rest/services/USA_NLCD_Annual_LandCover/ImageServer/exportImage",
+      pixelType: "U8",
+      size: "1024,1024",
+      interpolation: "RSP_NearestNeighbor",
+      noData: "0"
+    };
+  }
+
   return null;
 }
 
@@ -366,6 +413,33 @@ async function getDatasetManifestSource(
       provider: "USGS National Map Contours",
       queryUrl: getContourQueryUrl(location, 250).toString(),
       featureCount: await fetchContourCount(location).catch(() => null)
+    };
+  }
+
+  if (datasetId === "land-cover" && rasterExportOptions) {
+    return {
+      datasetId,
+      label: datasetLabels[datasetId],
+      provider: "USGS MRLC NLCD Annual Land Cover ImageServer",
+      export: await fetchRasterExport(location, rasterExportOptions)
+    };
+  }
+
+  if (datasetId === "soil") {
+    return {
+      datasetId,
+      label: datasetLabels[datasetId],
+      provider: "USDA NRCS Soil Data Access WFS",
+      queryUrl: getSoilQueryUrl(location, 120).toString()
+    };
+  }
+
+  if (datasetId === "flood-hazard") {
+    return {
+      datasetId,
+      label: datasetLabels[datasetId],
+      provider: "FEMA National Flood Hazard Layer",
+      queryUrl: getFloodHazardQueryUrl(location, 300).toString()
     };
   }
 
@@ -572,6 +646,52 @@ function getContourQueryUrl(location: SafeDatasetLocation, limit: number) {
   return url;
 }
 
+async function fetchSoilFeatures(location: SafeDatasetLocation, limit: number) {
+  const response = await fetchText(getSoilQueryUrl(location, limit));
+  return parseSoilGml(response);
+}
+
+function getSoilQueryUrl(location: SafeDatasetLocation, limit: number) {
+  const url = new URL(
+    "https://sdmdataaccess.sc.egov.usda.gov/Spatial/SDMWGS84Geographic.wfs"
+  );
+  url.searchParams.set("SERVICE", "WFS");
+  url.searchParams.set("VERSION", "1.1.0");
+  url.searchParams.set("REQUEST", "GetFeature");
+  url.searchParams.set("TYPENAME", "MapunitPoly");
+  url.searchParams.set("BBOX", bboxString(location));
+  url.searchParams.set("MAXFEATURES", String(limit));
+  url.searchParams.set("OUTPUTFORMAT", "GML3");
+  return url;
+}
+
+async function fetchFloodHazardFeatures(location: SafeDatasetLocation, limit: number) {
+  const payload = await fetchJson<PolygonResponse>(
+    getFloodHazardQueryUrl(location, limit)
+  );
+  return payload.features ?? [];
+}
+
+function getFloodHazardQueryUrl(location: SafeDatasetLocation, limit: number) {
+  const url = new URL(
+    "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28/query"
+  );
+  url.searchParams.set("f", "json");
+  url.searchParams.set("where", "1=1");
+  url.searchParams.set(
+    "outFields",
+    "FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE,V_DATUM,DEPTH,LEN_UNIT"
+  );
+  url.searchParams.set("returnGeometry", "true");
+  url.searchParams.set("geometry", bboxString(location));
+  url.searchParams.set("geometryType", "esriGeometryEnvelope");
+  url.searchParams.set("inSR", "4326");
+  url.searchParams.set("outSR", "4326");
+  url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
+  url.searchParams.set("resultRecordCount", String(limit));
+  return url;
+}
+
 function createProviderLayers(
   project: ProjectMetadata,
   location: SafeDatasetLocation,
@@ -579,6 +699,8 @@ function createProviderLayers(
   contourFeatures: ContourFeature[],
   hydroFeatures: HydroFeature[],
   transportFeatures: Array<{ kind: string; feature: TransportFeature }>,
+  soilFeatures: PolygonFeature[],
+  floodFeatures: PolygonFeature[],
   assets: PersistedRasterAsset[]
 ): PlanningLayer[] {
   return datasetIds.map((datasetId) => {
@@ -592,6 +714,14 @@ function createProviderLayers(
 
     if (datasetId === "transportation") {
       return createTransportationLayer(project, location, transportFeatures);
+    }
+
+    if (datasetId === "soil") {
+      return createSoilLayer(project, location, soilFeatures);
+    }
+
+    if (datasetId === "flood-hazard") {
+      return createFloodHazardLayer(project, location, floodFeatures);
     }
 
     return createSourceReferenceLayer(
@@ -711,19 +841,101 @@ function createTransportationLayer(
   };
 }
 
+function createSoilLayer(
+  project: ProjectMetadata,
+  location: SafeDatasetLocation,
+  soilFeatures: PolygonFeature[]
+): PlanningLayer {
+  const features = soilFeatures.flatMap((feature, featureIndex) =>
+    polygonFeatureToVectorFeatures(
+      project,
+      feature,
+      featureIndex,
+      "soil-map-unit",
+      "USDA NRCS Soil Data Access",
+      "Provider soil map unit for drainage, erosion, planting, and suitability review."
+    )
+  );
+
+  return {
+    id: "safe-data-soil",
+    name: datasetLabels.soil,
+    kind: "foundational-map",
+    visible: true,
+    opacity: 0.58,
+    reviewStatus: "draft",
+    category: "soil",
+    geometryType: "polygon",
+    source: createLayerSource(project, location, "soil"),
+    style: {
+      stroke: "#8a6f3f",
+      fill: "#b89655",
+      strokeWidth: 1
+    },
+    legend: [{ label: "SSURGO map unit", color: "#b89655" }],
+    features,
+    planningImpactNotes: [
+      `${features.length} soil map unit polygons imported from USDA NRCS Soil Data Access.`,
+      `Target processing CRS: ${location.targetCrs}.`
+    ],
+    locked: true
+  };
+}
+
+function createFloodHazardLayer(
+  project: ProjectMetadata,
+  location: SafeDatasetLocation,
+  floodFeatures: PolygonFeature[]
+): PlanningLayer {
+  const features = floodFeatures.flatMap((feature, featureIndex) =>
+    polygonFeatureToVectorFeatures(
+      project,
+      feature,
+      featureIndex,
+      "fema-flood-zone",
+      "FEMA National Flood Hazard Layer",
+      "Provider flood hazard polygon for regulatory flood risk and suitability review."
+    )
+  );
+
+  return {
+    id: "safe-data-flood-hazard",
+    name: datasetLabels["flood-hazard"],
+    kind: "foundational-map",
+    visible: true,
+    opacity: 0.5,
+    reviewStatus: "draft",
+    category: "risk-suitability",
+    geometryType: "polygon",
+    source: createLayerSource(project, location, "flood-hazard"),
+    style: {
+      stroke: "#7c4d78",
+      fill: "#b874a8",
+      strokeWidth: 1.25
+    },
+    legend: [{ label: "NFHL flood hazard zone", color: "#b874a8" }],
+    features,
+    planningImpactNotes: [
+      `${features.length} flood hazard polygons imported from FEMA NFHL.`,
+      `Target processing CRS: ${location.targetCrs}.`
+    ],
+    locked: true
+  };
+}
+
 function createSourceReferenceLayer(
   project: ProjectMetadata,
   location: SafeDatasetLocation,
   datasetId: SafeDatasetId,
   asset?: PersistedRasterAsset
 ): PlanningLayer {
-  const isRaster = datasetId === "naip-ortho" || datasetId === "dem-3dep";
+  const isRaster = isRasterDataset(datasetId);
   return {
     id: `safe-data-${datasetId}`,
     name: datasetLabels[datasetId],
     kind: datasetId === "naip-ortho" ? "orthophoto" : "foundational-map",
     visible: true,
-    opacity: datasetId === "naip-ortho" || datasetId === "dem-3dep" ? 1 : 0.68,
+    opacity: isRaster ? 1 : 0.68,
     reviewStatus: "draft",
     category: getLayerCategory(datasetId),
     geometryType: isRaster ? "raster" : "mixed",
@@ -757,9 +969,7 @@ async function persistRasterAssets(
   sources: Array<{ datasetId: SafeDatasetId; export?: RasterExportResponse }>
 ) {
   const rasterSources = sources.filter(
-    (source) =>
-      (source.datasetId === "naip-ortho" || source.datasetId === "dem-3dep") &&
-      source.export?.href
+    (source) => isRasterDataset(source.datasetId) && source.export?.href
   );
   const assets: PersistedRasterAsset[] = [];
 
@@ -1034,6 +1244,68 @@ function transportFeatureToVectorFeatures(
   return vectorFeatures;
 }
 
+function polygonFeatureToVectorFeatures(
+  project: ProjectMetadata,
+  feature: PolygonFeature,
+  featureIndex: number,
+  idPrefix: string,
+  source: string,
+  planningImpact: string
+): VectorFeature[] {
+  const attributes = feature.attributes ?? {};
+  const attributeEntries: Record<string, string> = { source };
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+    attributeEntries[key] = String(value);
+  }
+
+  const label = getPolygonFeatureLabel(attributes, idPrefix, featureIndex);
+  const vectorFeatures: VectorFeature[] = [];
+  const rings = feature.geometry?.rings ?? [];
+  for (const [ringIndex, ring] of rings.entries()) {
+    const coordinates = ring.map((point) =>
+      Array.isArray(point)
+        ? mapCoordinateToProject([Number(point[0]), Number(point[1])], project)
+        : mapCoordinateToProject([point.x, point.y], project)
+    );
+    if (coordinates.length < 3) {
+      continue;
+    }
+    vectorFeatures.push({
+      id: `${idPrefix}-${featureIndex + 1}-${ringIndex + 1}`,
+      label,
+      geometryType: "polygon",
+      coordinates,
+      attributes: attributeEntries,
+      planningImpact
+    });
+  }
+
+  return vectorFeatures;
+}
+
+function getPolygonFeatureLabel(
+  attributes: Record<string, string | number | null | undefined>,
+  fallbackPrefix: string,
+  featureIndex: number
+) {
+  const candidate =
+    attributes.musym ??
+    attributes.nationalmusym ??
+    attributes.mukey ??
+    attributes.FLD_ZONE ??
+    attributes.ZONE_SUBTY;
+  if (typeof candidate === "string" && candidate.trim()) {
+    return candidate.trim();
+  }
+  if (typeof candidate === "number") {
+    return String(candidate);
+  }
+  return `${fallbackPrefix.replace(/-/g, " ")} ${featureIndex + 1}`;
+}
+
 function getTransportFeatureLabel(
   attributes: Record<string, string | number | null | undefined>,
   layerKind: string,
@@ -1129,6 +1401,82 @@ async function fetchJson<T>(url: URL): Promise<T> {
   }
 }
 
+async function fetchText(url: URL): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), jsonRequestTimeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      headers: { accept: "application/xml,text/xml" },
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`${url.hostname} request failed: ${response.status}`);
+    }
+    return await response.text();
+  } catch (error) {
+    throw formatProviderFetchError(error, url.hostname, jsonRequestTimeoutMs);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function parseSoilGml(gml: string): PolygonFeature[] {
+  const features: PolygonFeature[] = [];
+  const featureMatches = gml.matchAll(/<ms:mapunitpoly\b[\s\S]*?<\/ms:mapunitpoly>/g);
+  for (const match of featureMatches) {
+    const featureXml = match[0];
+    const rings = Array.from(
+      featureXml.matchAll(/<gml:posList[^>]*>([\s\S]*?)<\/gml:posList>/g)
+    )
+      .map((ringMatch) => parseGmlPosList(ringMatch[1]))
+      .filter((ring) => ring.length >= 3);
+
+    if (rings.length === 0) {
+      continue;
+    }
+
+    features.push({
+      attributes: {
+        areasymbol: getXmlTagValue(featureXml, "areasymbol"),
+        musym: getXmlTagValue(featureXml, "musym"),
+        nationalmusym: getXmlTagValue(featureXml, "nationalmusym"),
+        mukey: getXmlTagValue(featureXml, "mukey"),
+        muareaacres: getXmlTagValue(featureXml, "muareaacres")
+      },
+      geometry: { rings }
+    });
+  }
+  return features;
+}
+
+function parseGmlPosList(posList: string): number[][] {
+  const values = posList
+    .trim()
+    .split(/\s+/)
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  const points: number[][] = [];
+  for (let index = 0; index < values.length - 1; index += 2) {
+    points.push([values[index + 1], values[index]]);
+  }
+  return points;
+}
+
+function getXmlTagValue(xml: string, localName: string) {
+  const pattern = new RegExp(`<ms:${localName}>([\\s\\S]*?)<\\/ms:${localName}>`);
+  return decodeXmlEntities(pattern.exec(xml)?.[1]?.trim() ?? "");
+}
+
+function decodeXmlEntities(value: string) {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
 function formatProviderFetchError(
   error: unknown,
   source: string,
@@ -1163,6 +1511,12 @@ function getLayerCategory(datasetId: SafeDatasetId): PlanningLayer["category"] {
       return "hydrology";
     case "transportation":
       return "infrastructure-utilities";
+    case "soil":
+      return "soil";
+    case "land-cover":
+      return "ecology-vegetation";
+    case "flood-hazard":
+      return "risk-suitability";
     default:
       return "designer-created";
   }
@@ -1180,9 +1534,19 @@ function getLayerColor(datasetId: SafeDatasetId) {
       return "#367aa2";
     case "transportation":
       return "#5a5f66";
+    case "soil":
+      return "#b89655";
+    case "land-cover":
+      return "#5d8c4a";
+    case "flood-hazard":
+      return "#b874a8";
     default:
       return "#68706a";
   }
+}
+
+function isRasterDataset(datasetId: SafeDatasetId) {
+  return datasetId === "naip-ortho" || datasetId === "dem-3dep" || datasetId === "land-cover";
 }
 
 function safeRatio(numerator: number, denominator: number) {

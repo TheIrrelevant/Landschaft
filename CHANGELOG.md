@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-01
 last-model: codex-gpt-5
-last-change: log soil land-cover and flood-hazard safe dataset imports
+last-change: log TNMAccess metadata timeout fallback
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Kept safe dataset imports running when TNMAccess product metadata times out, while still surfacing provider metadata status in the manifest.
 - Added USDA soils, NLCD land cover, and FEMA flood hazard options to the safe dataset import flow.
 - Paginated USGS National Map transportation import so local roads and trails are no longer capped at preview limits (Boulder AOI now imports the full road network).
 - Increased MCP provider JSON and raster download timeouts and surfaced clearer timeout errors instead of generic aborted fetch messages.

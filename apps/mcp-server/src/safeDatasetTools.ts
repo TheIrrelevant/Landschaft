@@ -4,7 +4,7 @@
  * description: MCP handlers for USA safe-location dataset discovery and import.
  * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: import soil, land-cover, and flood-hazard safe datasets
+ * last-change: keep safe imports running when TNMAccess product metadata times out
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -66,6 +66,10 @@ interface TnmProductsResponse {
   total?: number;
   items?: TnmProduct[];
 }
+
+type TnmProductsResult = TnmProductsResponse & {
+  unavailableReason?: string;
+};
 
 interface RasterExportResponse {
   href?: string;
@@ -241,7 +245,7 @@ export async function handleSafeDatasetManifest(
     selectedDatasetIds,
     sources,
     importOrder: selectedDatasetIds,
-  notes: [
+    notes: [
       "All requests use the selected AOI bbox.",
       "NAIP and 3DEP raster exports are requested as clipped TIFFs from provider ImageServer endpoints.",
       "A follow-up worker can persist these hrefs to local assets and reproject them to the target CRS."
@@ -395,14 +399,22 @@ async function getDatasetManifestSource(
   }
 
   if (datasetId === "dem-3dep" && rasterExportOptions) {
-    const products = await fetchTnmProducts(location, datasetId);
+    const [rasterExport, products] = await Promise.all([
+      fetchRasterExport(location, rasterExportOptions),
+      fetchTnmProducts(location, datasetId).catch((error) =>
+        createUnavailableTnmProducts(error)
+      )
+    ]);
     return {
       datasetId,
       label: datasetLabels[datasetId],
       provider: "USGS 3DEP ImageServer / TNMAccess",
-      export: await fetchRasterExport(location, rasterExportOptions),
+      export: rasterExport,
       total: products.total ?? 0,
-      products: (products.items ?? []).slice(0, 8).map(summarizeTnmProduct)
+      products: (products.items ?? []).slice(0, 8).map(summarizeTnmProduct),
+      ...(products.unavailableReason
+        ? { providerStatus: "metadata-unavailable", unavailableReason: products.unavailableReason }
+        : {})
     };
   }
 
@@ -443,13 +455,18 @@ async function getDatasetManifestSource(
     };
   }
 
-  const products = await fetchTnmProducts(location, datasetId);
+  const products = await fetchTnmProducts(location, datasetId).catch((error) =>
+    createUnavailableTnmProducts(error)
+  );
   return {
     datasetId,
     label: datasetLabels[datasetId],
     provider: "USGS TNMAccess",
     total: products.total ?? 0,
-    products: (products.items ?? []).slice(0, 8).map(summarizeTnmProduct)
+    products: (products.items ?? []).slice(0, 8).map(summarizeTnmProduct),
+    ...(products.unavailableReason
+      ? { providerStatus: "metadata-unavailable", unavailableReason: products.unavailableReason }
+      : {})
   };
 }
 
@@ -487,7 +504,10 @@ async function fetchRasterExport(
   return fetchJson<RasterExportResponse>(buildRasterExportUrl(location, options, "json"));
 }
 
-async function fetchTnmProducts(location: SafeDatasetLocation, datasetId: SafeDatasetId) {
+async function fetchTnmProducts(
+  location: SafeDatasetLocation,
+  datasetId: SafeDatasetId
+): Promise<TnmProductsResult> {
   const datasets = tnmDatasets[datasetId] ?? [];
   const responses = await Promise.all(
     datasets.map((dataset) => {
@@ -506,6 +526,17 @@ async function fetchTnmProducts(location: SafeDatasetLocation, datasetId: SafeDa
   return {
     total: responses.reduce((total, response) => total + (response.total ?? 0), 0),
     items
+  };
+}
+
+function createUnavailableTnmProducts(error: unknown): TnmProductsResult {
+  return {
+    total: 0,
+    items: [],
+    unavailableReason:
+      error instanceof Error
+        ? error.message
+        : "TNMAccess product metadata is unavailable."
   };
 }
 

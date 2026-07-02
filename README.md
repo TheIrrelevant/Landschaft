@@ -3,7 +3,7 @@ type: readme
 description: Technical entrypoint for the Landschaft web editor and MCP server.
 last-updated: 2026-07-02
 last-model: codex-gpt-5
-last-change: document hosted MCP backend deployment
+last-change: document static GitHub Pages demo branch
 ---
 
 # Landschaft
@@ -11,6 +11,12 @@ last-change: document hosted MCP backend deployment
 Landschaft is a vector-first landscape planning editor.
 
 Agents and contributors must read [AGENTS.md](./AGENTS.md) before changing files.
+
+## Branches
+
+- `demo`: GitHub Pages demo branch with bundled Boulder Flatirons static safe dataset data.
+- `developing`: active development branch reset to the pre-Pages commit.
+- `main`: preserved remote branch history.
 
 The first technical stack is:
 
@@ -40,21 +46,24 @@ npm run build
 
 ## GitHub Pages
 
-The web editor is deployed as a GitHub project Pages site from `apps/web/dist`.
+The demo branch deploys the web editor as a GitHub project Pages site from `apps/web/dist`.
 The deployment workflow builds the Vite app with `GITHUB_PAGES=true`, which sets
 the asset base path to `/Landschaft/`.
 
 Enable Pages in the GitHub repository settings with `GitHub Actions` as the
-source. The workflow runs on pushes to `main` and can also be started manually
+source. The workflow runs on pushes to `demo` and can also be started manually
 from the Actions tab.
 
-Safe dataset imports require a hosted MCP HTTP bridge. Set the GitHub repository
-variable `LANDSCHAFT_MCP_HTTP_URL` to the deployed backend origin before running
-the Pages workflow:
+The public demo does not require a hosted MCP backend. It loads bundled static
+safe dataset data from:
 
-```bash
-gh variable set LANDSCHAFT_MCP_HTTP_URL --body https://your-backend.example.com
+```text
+apps/web/public/test-data/boulder-flatirons/import.json
 ```
+
+The static demo data contains Boulder Flatirons terrain and vector provider
+layers generated from the safe dataset import flow. Live provider-backed imports
+still require the hosted MCP backend described below.
 
 ## Hosted MCP Backend
 

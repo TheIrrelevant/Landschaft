@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-07-02
  * last-model: codex-gpt-5
- * last-change: avoid localhost backend fallback in production builds
+ * last-change: support static safe dataset demo imports
  * ---end-metadata---
  */
 import {
@@ -48,6 +48,7 @@ type SafeDatasetId =
   | "land-cover"
   | "flood-hazard";
 type SafeDatasetImportStatus = "idle" | "ready" | "importing" | "complete" | "error";
+const staticSafeDatasetUrl = import.meta.env.VITE_LANDSCHAFT_STATIC_SAFE_DATA_URL;
 const configuredSafeDatasetBridgeUrl = import.meta.env.VITE_LANDSCHAFT_MCP_HTTP_URL;
 const safeDatasetBridgeUrl =
   configuredSafeDatasetBridgeUrl ?? (import.meta.env.DEV ? "http://127.0.0.1:8787" : "");
@@ -1728,6 +1729,10 @@ async function fetchSafeDatasetImport(
 ): Promise<SafeDatasetBackendImportResult> {
   let response: Response;
 
+  if (staticSafeDatasetUrl) {
+    return fetchStaticSafeDatasetImport(staticSafeDatasetUrl);
+  }
+
   if (!safeDatasetBridgeUrl) {
     throw new Error(
       "Safe dataset backend URL is not configured for this deployment. Set VITE_LANDSCHAFT_MCP_HTTP_URL to the hosted Landschaft MCP HTTP bridge URL."
@@ -1761,6 +1766,17 @@ async function fetchSafeDatasetImport(
       payload?.error ??
         "Safe dataset backend is unavailable. Start the MCP server with npm run dev:mcp."
     );
+  }
+
+  return (await response.json()) as SafeDatasetBackendImportResult;
+}
+
+async function fetchStaticSafeDatasetImport(
+  url: string
+): Promise<SafeDatasetBackendImportResult> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Static safe dataset demo could not be loaded from ${url}.`);
   }
 
   return (await response.json()) as SafeDatasetBackendImportResult;

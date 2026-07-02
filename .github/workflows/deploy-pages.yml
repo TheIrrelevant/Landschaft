@@ -3,13 +3,13 @@
 # description: Builds and deploys the Landschaft web editor to GitHub Pages.
 # last-updated: 2026-07-02
 # last-model: codex-gpt-5
-# last-change: read hosted MCP backend URL from repository variables
+# last-change: publish the static demo branch with bundled safe dataset data
 name: Deploy Pages
 
 on:
   push:
     branches:
-      - main
+      - demo
   workflow_dispatch:
 
 permissions:
@@ -42,7 +42,7 @@ jobs:
         run: npm run build -w @landschaft/shared && npm run build -w @landschaft/web
         env:
           GITHUB_PAGES: "true"
-          VITE_LANDSCHAFT_MCP_HTTP_URL: ${{ vars.LANDSCHAFT_MCP_HTTP_URL }}
+          VITE_LANDSCHAFT_STATIC_SAFE_DATA_URL: /Landschaft/test-data/boulder-flatirons/import.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

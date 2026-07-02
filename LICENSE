@@ -1,0 +1,50 @@
+Proprietary Software License
+
+Copyright (c) 2026 Kraftreich. All rights reserved.
+
+This software and its source code, documentation, terrain generation logic,
+geospatial processing pipeline, provider import tooling, static demo datasets,
+MCP bridge logic, UI components, and all associated files (collectively, the
+"Software") are the exclusive intellectual property of Kraftreich.
+
+RESTRICTIONS
+
+You may NOT, without prior written permission from the copyright holder:
+
+  1. Copy, reproduce, or duplicate the Software in whole or in part.
+  2. Modify, adapt, translate, or create derivative works based on the Software.
+  3. Distribute, sublicense, lease, rent, loan, or otherwise transfer the
+     Software to any third party.
+  4. Reverse engineer, decompile, disassemble, or attempt to derive the source
+     code of any compiled portions of the Software.
+  5. Use the Software, or any part thereof, for commercial or non-commercial
+     purposes without an explicit license agreement.
+  6. Remove, alter, or obscure any proprietary notices, labels, or marks on
+     the Software.
+
+OWNERSHIP
+
+The Software, including but not limited to its architecture, terrain and map
+evidence models, provider import logic, geospatial workflows, MCP bridge, UI
+components, static demo data packaging, and planning workflow patterns, remains
+the sole property of Kraftreich. No title or intellectual property rights in
+the Software are transferred to you by this license.
+
+NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING
+FROM THE USE OF OR INABILITY TO USE THE SOFTWARE.
+
+TERMINATION
+
+Any unauthorized use, reproduction, or distribution of the Software will
+result in immediate termination of any implied rights and may result in
+legal action.
+
+CONTACT
+
+For licensing inquiries: Kraftreich
+GitHub: https://github.com/TheIrrelevant

@@ -39,7 +39,7 @@ jobs:
         run: npm ci
 
       - name: Build web
-        run: npm run build -w @landschaft/web
+        run: npm run build -w @landschaft/shared && npm run build -w @landschaft/web
         env:
           GITHUB_PAGES: "true"
           VITE_LANDSCHAFT_MCP_HTTP_URL: ${{ vars.LANDSCHAFT_MCP_HTTP_URL }}

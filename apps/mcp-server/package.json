@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx src/server.ts",
     "start": "node dist/server.js",
-    "build": "tsc -b",
+    "build": "tsc -b --force",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --ext .ts"
   },

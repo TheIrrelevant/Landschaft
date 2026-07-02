@@ -1,14 +1,15 @@
 /*
  * type: config
  * description: Vite configuration for the Landschaft web editor.
- * last-updated: 2026-06-27
+ * last-updated: 2026-07-02
  * last-model: codex-gpt-5
- * last-change: align chunk warning limit with the WebGPU vendor runtime
+ * last-change: add GitHub Pages base path for project-site deployments
  */
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  base: process.env.GITHUB_PAGES === "true" ? "/Landschaft/" : "/",
   build: {
     chunkSizeWarningLimit: 1500,
     rollupOptions: {

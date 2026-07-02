@@ -1,15 +1,16 @@
 ---
 type: changelog
 description: Release history for the Landschaft landscape planning editor.
-last-updated: 2026-07-01
+last-updated: 2026-07-02
 last-model: codex-gpt-5
-last-change: log non-fatal raster export failures during safe import
+last-change: log GitHub Pages deployment preparation
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Added GitHub Pages deployment preparation with a project-site Vite base path and Actions workflow.
 - Kept safe dataset imports running when optional raster exports such as NAIP time out; unavailable rasters now remain as source-reference layers instead of failing the full import.
 - Filled soil polygons with deterministic soil-type colors and made layer opacity update live while editing the opacity input.
 - Surface FEMA NFHL service failures separately from valid empty flood coverage so `0 features` no longer hides provider connectivity failures.

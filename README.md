@@ -1,9 +1,9 @@
 ---
 type: readme
 description: Technical entrypoint for the Landschaft web editor and MCP server.
-last-updated: 2026-06-30
+last-updated: 2026-07-02
 last-model: codex-gpt-5
-last-change: document safe dataset MCP bridge configuration
+last-change: document GitHub Pages deployment
 ---
 
 # Landschaft
@@ -37,6 +37,16 @@ npm run dev:mcp
 npm run typecheck
 npm run build
 ```
+
+## GitHub Pages
+
+The web editor is deployed as a GitHub project Pages site from `apps/web/dist`.
+The deployment workflow builds the Vite app with `GITHUB_PAGES=true`, which sets
+the asset base path to `/Landschaft/`.
+
+Enable Pages in the GitHub repository settings with `GitHub Actions` as the
+source. The workflow runs on pushes to `main` and can also be started manually
+from the Actions tab.
 
 The web editor calls the local MCP HTTP bridge at `http://127.0.0.1:8787` by default for safe dataset imports. Override it for alternate dev ports or remote bridge hosts:
 

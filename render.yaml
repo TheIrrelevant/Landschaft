@@ -1,0 +1,25 @@
+# type: render-blueprint
+# description: Render Blueprint for the hosted Landschaft MCP HTTP backend.
+# last-updated: 2026-07-02
+# last-model: codex-gpt-5
+# last-change: add Render web service blueprint for safe dataset backend
+services:
+  - type: web
+    name: landschaft-mcp
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    autoDeployTrigger: commit
+    dockerfilePath: apps/mcp-server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: LANDSCHAFT_MCP_HTTP_HOST
+        value: 0.0.0.0
+      - key: LANDSCHAFT_MCP_STDIO
+        value: "false"
+      - key: LANDSCHAFT_MCP_CORS_ORIGIN
+        value: https://theirrelevant.github.io
+      - key: LANDSCHAFT_PROVIDER_ASSET_ROOT
+        value: /tmp/landschaft-provider-assets

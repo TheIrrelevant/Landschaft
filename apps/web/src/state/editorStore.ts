@@ -1798,8 +1798,16 @@ function normalizeSafeDatasetLayer(layer: PlanningLayer): PlanningLayer {
 
   return {
     ...layer,
-    rasterPreviewUrl: `${safeDatasetBridgeUrl.replace(/\/$/, "")}${layer.rasterPreviewUrl}`
+    rasterPreviewUrl: `${getRasterPreviewBaseUrl()}${layer.rasterPreviewUrl}`
   };
+}
+
+function getRasterPreviewBaseUrl() {
+  if (staticSafeDatasetUrl) {
+    return import.meta.env.BASE_URL.replace(/\/$/, "");
+  }
+
+  return safeDatasetBridgeUrl.replace(/\/$/, "");
 }
 
 function summarizeSafeDatasetImport(result: SafeDatasetBackendImportResult) {

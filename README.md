@@ -3,7 +3,7 @@ type: readme
 description: Technical entrypoint for the Landschaft web editor and MCP server.
 last-updated: 2026-07-02
 last-model: codex-gpt-5
-last-change: document static GitHub Pages demo branch
+last-change: document full static dataset demo contents
 ---
 
 # Landschaft
@@ -61,8 +61,9 @@ safe dataset data from:
 apps/web/public/test-data/boulder-flatirons/import.json
 ```
 
-The static demo data contains Boulder Flatirons terrain and vector provider
-layers generated from the safe dataset import flow. Live provider-backed imports
+The static demo data contains the full Boulder Flatirons safe dataset selection:
+NAIP orthophoto, 3DEP DEM, USGS contours, hydrography, transportation, USDA
+soils, NLCD land cover, and FEMA flood hazard. Live provider-backed imports
 still require the hosted MCP backend described below.
 
 ## Hosted MCP Backend

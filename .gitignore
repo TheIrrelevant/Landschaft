@@ -6,3 +6,6 @@ dist
 *.log
 *.tsbuildinfo
 apps/web/public/provider-assets/
+!apps/web/public/provider-assets/
+!apps/web/public/provider-assets/boulder-flatirons-co/
+!apps/web/public/provider-assets/boulder-flatirons-co/*.tif

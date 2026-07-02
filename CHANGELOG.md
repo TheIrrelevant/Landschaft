@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-02
 last-model: codex-gpt-5
-last-change: log static GitHub Pages demo branch
+last-change: log full static dataset demo contents
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Expanded the static Boulder Flatirons demo to include every available safe dataset option, including NAIP, 3DEP DEM, and NLCD raster assets.
 - Added static Boulder Flatirons safe dataset demo data and wired the demo branch Pages workflow to load it without a hosted backend.
 - Made the MCP HTTP bridge deployable as a hosted backend for GitHub Pages, including public host/port configuration, provider asset serving, Docker support, and Pages backend URL wiring.
 - Added GitHub Pages deployment preparation with a project-site Vite base path and Actions workflow.

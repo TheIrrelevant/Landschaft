@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: MCP handlers for USA safe-location dataset discovery and import.
- * last-updated: 2026-07-01
+ * last-updated: 2026-07-02
  * last-model: codex-gpt-5
- * last-change: keep imports running when optional raster exports fail
+ * last-change: support hosted provider asset storage and public URLs
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -172,6 +172,7 @@ const transportMaxFeaturesPerLayer = 3_000;
 
 const jsonRequestTimeoutMs = 45_000;
 const rasterDownloadTimeoutMs = 120_000;
+const providerAssetPublicBaseUrl = process.env.LANDSCHAFT_PROVIDER_ASSET_PUBLIC_URL;
 
 const safeDatasetLocations: SafeDatasetLocation[] = [
   {
@@ -1054,16 +1055,9 @@ async function persistRasterAssets(
       continue;
     }
 
-    const publicPath = `/provider-assets/${location.id}/${source.datasetId}.tif`;
-    const localPath = join(
-      await findRepoRoot(),
-      "apps",
-      "web",
-      "public",
-      "provider-assets",
-      location.id,
-      `${source.datasetId}.tif`
-    );
+    const assetPath = `${location.id}/${source.datasetId}.tif`;
+    const publicPath = createProviderAssetPublicPath(assetPath);
+    const localPath = join(await getProviderAssetRoot(), assetPath);
     const rasterExportOptions = getRasterExportOptions(source.datasetId);
     if (!rasterExportOptions) {
       continue;
@@ -1093,6 +1087,21 @@ async function persistRasterAssets(
   }
 
   return assets;
+}
+
+function createProviderAssetPublicPath(assetPath: string) {
+  if (!providerAssetPublicBaseUrl) {
+    return `/provider-assets/${assetPath}`;
+  }
+
+  return `${providerAssetPublicBaseUrl.replace(/\/$/, "")}/${assetPath}`;
+}
+
+async function getProviderAssetRoot() {
+  return (
+    process.env.LANDSCHAFT_PROVIDER_ASSET_ROOT ??
+    join(await findRepoRoot(), "apps", "web", "public", "provider-assets")
+  );
 }
 
 async function downloadRasterExport(

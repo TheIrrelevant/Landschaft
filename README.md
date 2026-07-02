@@ -3,7 +3,7 @@ type: readme
 description: Technical entrypoint for the Landschaft web editor and MCP server.
 last-updated: 2026-07-02
 last-model: codex-gpt-5
-last-change: document GitHub Pages deployment
+last-change: document hosted MCP backend deployment
 ---
 
 # Landschaft
@@ -47,6 +47,60 @@ the asset base path to `/Landschaft/`.
 Enable Pages in the GitHub repository settings with `GitHub Actions` as the
 source. The workflow runs on pushes to `main` and can also be started manually
 from the Actions tab.
+
+Safe dataset imports require a hosted MCP HTTP bridge. Set the GitHub repository
+variable `LANDSCHAFT_MCP_HTTP_URL` to the deployed backend origin before running
+the Pages workflow:
+
+```bash
+gh variable set LANDSCHAFT_MCP_HTTP_URL --body https://your-backend.example.com
+```
+
+## Hosted MCP Backend
+
+The MCP server can run as a public HTTP bridge for the Pages deployment.
+
+Required production environment:
+
+```bash
+PORT=8787
+LANDSCHAFT_MCP_HTTP_HOST=0.0.0.0
+LANDSCHAFT_MCP_STDIO=false
+LANDSCHAFT_MCP_CORS_ORIGIN=https://theirrelevant.github.io
+LANDSCHAFT_PROVIDER_ASSET_ROOT=/tmp/landschaft-provider-assets
+```
+
+Optional production environment:
+
+```bash
+LANDSCHAFT_PROVIDER_ASSET_PUBLIC_URL=https://your-backend.example.com/provider-assets
+```
+
+The backend exposes:
+
+- `GET /health`
+- `GET /safe-dataset/search`
+- `POST /safe-dataset/manifest`
+- `POST /safe-dataset/import`
+- `GET /provider-assets/...`
+
+Build and start without Docker:
+
+```bash
+npm ci
+npm run build
+LANDSCHAFT_MCP_HTTP_HOST=0.0.0.0 LANDSCHAFT_MCP_STDIO=false npm run start:mcp
+```
+
+Build with Docker:
+
+```bash
+docker build -f apps/mcp-server/Dockerfile -t landschaft-mcp .
+docker run --rm -p 8787:8787 \
+  -e PORT=8787 \
+  -e LANDSCHAFT_MCP_CORS_ORIGIN=https://theirrelevant.github.io \
+  landschaft-mcp
+```
 
 The web editor calls the local MCP HTTP bridge at `http://127.0.0.1:8787` by default for safe dataset imports. Override it for alternate dev ports or remote bridge hosts:
 

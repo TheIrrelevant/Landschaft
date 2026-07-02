@@ -1,11 +1,15 @@
 /*
  * type: app-source
  * description: MCP server exposing Landschaft planning editor terrain and map tools.
- * last-updated: 2026-07-01
+ * last-updated: 2026-07-02
  * last-model: codex-gpt-5
- * last-change: add soil, land-cover, and flood-hazard safe dataset ids
+ * last-change: make HTTP bridge deployable without stdio transport
  */
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { dirname, join, normalize, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CodedAreaSchema,
   generateTerrainProjectAsync,
@@ -25,7 +29,13 @@ const server = new McpServer({
   name: "landschaft",
   version: "0.1.0"
 });
-const httpPort = Number(process.env.LANDSCHAFT_MCP_HTTP_PORT ?? 8787);
+const httpHost = process.env.LANDSCHAFT_MCP_HTTP_HOST ?? "127.0.0.1";
+const httpPort = Number(process.env.PORT ?? process.env.LANDSCHAFT_MCP_HTTP_PORT ?? 8787);
+const corsOrigin = process.env.LANDSCHAFT_MCP_CORS_ORIGIN ?? "*";
+const stdioEnabled = process.env.LANDSCHAFT_MCP_STDIO !== "false";
+const providerAssetRoot = resolve(
+  process.env.LANDSCHAFT_PROVIDER_ASSET_ROOT ?? getDefaultProviderAssetRoot()
+);
 
 const SafeDatasetIdSchema = z.enum([
   "naip-ortho",
@@ -302,13 +312,16 @@ server.tool(
   })
 );
 
-const transport = new StdioServerTransport();
 startHttpBridge();
-await server.connect(transport);
+
+if (stdioEnabled) {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
 
 function startHttpBridge() {
   const httpServer = createServer(async (request, response) => {
-    response.setHeader("Access-Control-Allow-Origin", "*");
+    response.setHeader("Access-Control-Allow-Origin", corsOrigin);
     response.setHeader("Access-Control-Allow-Headers", "content-type");
     response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
 
@@ -320,6 +333,19 @@ function startHttpBridge() {
 
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+
+      if (request.method === "GET" && url.pathname === "/health") {
+        sendJson(response, {
+          status: "ok",
+          service: "landschaft-mcp-http-bridge"
+        });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname.startsWith("/provider-assets/")) {
+        await sendProviderAsset(response, url.pathname);
+        return;
+      }
 
       if (request.method === "GET" && url.pathname === "/safe-dataset/search") {
         sendJson(response, handleSafeDatasetSearch(url.searchParams.get("query") ?? ""));
@@ -367,7 +393,7 @@ function startHttpBridge() {
   httpServer.on("error", (error: NodeJS.ErrnoException) => {
     if (error.code === "EADDRINUSE") {
       console.error(
-        `Landschaft MCP HTTP bridge skipped: 127.0.0.1:${httpPort} is already in use.`
+        `Landschaft MCP HTTP bridge skipped: ${httpHost}:${httpPort} is already in use.`
       );
       return;
     }
@@ -379,7 +405,7 @@ function startHttpBridge() {
     );
   });
 
-  httpServer.listen(httpPort, "127.0.0.1");
+  httpServer.listen(httpPort, httpHost);
 }
 
 function sendJson(response: ServerResponse, payload: unknown, status = 200) {
@@ -410,4 +436,38 @@ function readJsonBody(request: IncomingMessage) {
 function parseDatasetIds(value: unknown) {
   const result = z.array(SafeDatasetIdSchema).safeParse(value);
   return result.success ? result.data : undefined;
+}
+
+async function sendProviderAsset(response: ServerResponse, pathname: string) {
+  const assetPath = decodeURIComponent(pathname.replace(/^\/provider-assets\//, ""));
+  const normalizedAssetPath = normalize(assetPath);
+  const localPath = resolve(providerAssetRoot, normalizedAssetPath);
+  const relativePath = relative(providerAssetRoot, localPath);
+
+  if (relativePath.startsWith("..") || relativePath === "" || relativePath.includes("..")) {
+    sendJson(response, { error: "Invalid provider asset path." }, 400);
+    return;
+  }
+
+  try {
+    const assetStats = await stat(localPath);
+    if (!assetStats.isFile()) {
+      sendJson(response, { error: "Provider asset not found." }, 404);
+      return;
+    }
+  } catch {
+    sendJson(response, { error: "Provider asset not found." }, 404);
+    return;
+  }
+
+  response.writeHead(200, {
+    "cache-control": "public, max-age=86400",
+    "content-type": "image/tiff"
+  });
+  createReadStream(localPath).pipe(response);
+}
+
+function getDefaultProviderAssetRoot() {
+  const serverDir = dirname(fileURLToPath(import.meta.url));
+  return join(serverDir, "..", "..", "..", "apps", "web", "public", "provider-assets");
 }

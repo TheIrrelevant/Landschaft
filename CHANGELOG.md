@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-02
 last-model: codex-gpt-5
-last-change: log GitHub Pages deployment preparation
+last-change: log hosted MCP backend preparation
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Made the MCP HTTP bridge deployable as a hosted backend for GitHub Pages, including public host/port configuration, provider asset serving, Docker support, and Pages backend URL wiring.
 - Added GitHub Pages deployment preparation with a project-site Vite base path and Actions workflow.
 - Kept safe dataset imports running when optional raster exports such as NAIP time out; unavailable rasters now remain as source-reference layers instead of failing the full import.
 - Filled soil polygons with deterministic soil-type colors and made layer opacity update live while editing the opacity input.

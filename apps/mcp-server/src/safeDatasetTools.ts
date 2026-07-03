@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: MCP handlers for USA safe-location dataset discovery and import.
- * last-updated: 2026-07-01
+ * last-updated: 2026-07-03
  * last-model: codex-gpt-5
- * last-change: keep imports running when optional raster exports fail
+ * last-change: add structures, boundaries, and woodland safe dataset imports
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import {
   generateTerrainProjectAsync,
   getExtentMeters,
+  type Coordinate,
   type OrthophotoCorner,
   type PlanningLayer,
   type ProjectMetadata,
@@ -28,7 +29,10 @@ export type SafeDatasetId =
   | "transportation"
   | "soil"
   | "land-cover"
-  | "flood-hazard";
+  | "structures"
+  | "buildings"
+  | "boundaries"
+  | "woodland";
 
 interface SafeDatasetLocation {
   id: string;
@@ -68,11 +72,6 @@ interface TnmProductsResponse {
 }
 
 type TnmProductsResult = TnmProductsResponse & {
-  unavailableReason?: string;
-};
-
-type ProviderFeatureResult<T> = {
-  features: T[];
   unavailableReason?: string;
 };
 
@@ -154,9 +153,70 @@ interface PolygonFeature {
   };
 }
 
+interface PointFeature {
+  attributes?: Record<string, string | number | null | undefined>;
+  geometry?: ArcGisPoint | number[];
+}
+
+interface PointResponse {
+  features?: PointFeature[];
+}
+
 interface PolygonResponse {
   features?: PolygonFeature[];
 }
+
+interface OverpassGeometryPoint {
+  lat: number;
+  lon: number;
+}
+
+interface OverpassElement {
+  type: string;
+  id: number;
+  tags?: Record<string, string>;
+  geometry?: OverpassGeometryPoint[];
+}
+
+interface OverpassResponse {
+  elements?: OverpassElement[];
+}
+
+const structureLayerConfig = [
+  { layerId: 37, kind: "cemetery" },
+  { layerId: 38, kind: "post-office" },
+  { layerId: 39, kind: "city-town-hall" },
+  { layerId: 40, kind: "courthouse" },
+  { layerId: 46, kind: "historic-site" },
+  { layerId: 49, kind: "hospital" },
+  { layerId: 50, kind: "ambulance-service" },
+  { layerId: 51, kind: "fire-station" },
+  { layerId: 53, kind: "police-station" },
+  { layerId: 56, kind: "college-university" },
+  { layerId: 57, kind: "technical-school" },
+  { layerId: 58, kind: "school" },
+  { layerId: 60, kind: "campground" },
+  { layerId: 61, kind: "trailhead" },
+  { layerId: 62, kind: "cabin" },
+  { layerId: 63, kind: "shelter" },
+  { layerId: 64, kind: "picnic-area" },
+  { layerId: 65, kind: "headquarters" },
+  { layerId: 66, kind: "visitor-center" },
+  { layerId: 67, kind: "ranger-station" }
+] as const;
+
+const boundaryLayerConfig = [
+  { layerId: 23, kind: "county" },
+  { layerId: 24, kind: "incorporated-place" },
+  { layerId: 25, kind: "unincorporated-place" },
+  { layerId: 29, kind: "national-park" },
+  { layerId: 30, kind: "national-monument" },
+  { layerId: 31, kind: "national-forest" },
+  { layerId: 32, kind: "national-wilderness" },
+  { layerId: 33, kind: "national-grassland" },
+  { layerId: 35, kind: "us-fish-wildlife-service" },
+  { layerId: 36, kind: "bureau-of-land-management" }
+] as const;
 
 const transportLayerConfig = [
   { layerId: 29, kind: "highway" },
@@ -186,7 +246,7 @@ const safeDatasetLocations: SafeDatasetLocation[] = [
       north: 40.028
     },
     targetCrs: "EPSG:26913",
-    dataSource: "USGS The National Map / NAIP / USDA NRCS / FEMA",
+    dataSource: "USGS The National Map / NAIP / USDA NRCS",
     datasets: [
       "naip-ortho",
       "dem-3dep",
@@ -195,7 +255,10 @@ const safeDatasetLocations: SafeDatasetLocation[] = [
       "transportation",
       "soil",
       "land-cover",
-      "flood-hazard"
+      "structures",
+      "buildings",
+      "boundaries",
+      "woodland"
     ]
   }
 ];
@@ -208,7 +271,10 @@ const datasetLabels: Record<SafeDatasetId, string> = {
   transportation: "Transportation",
   soil: "USDA soils",
   "land-cover": "NLCD land cover",
-  "flood-hazard": "FEMA flood hazard"
+  structures: "Structures",
+  buildings: "Buildings",
+  boundaries: "Boundaries",
+  woodland: "Woodland"
 };
 
 const tnmDatasets: Partial<Record<SafeDatasetId, string[]>> = {
@@ -217,7 +283,10 @@ const tnmDatasets: Partial<Record<SafeDatasetId, string[]>> = {
     "National Elevation Dataset (NED) 1/3 arc-second"
   ],
   hydrography: ["National Hydrography Dataset (NHD) Best Resolution"],
-  transportation: ["National Transportation Dataset (NTD)"]
+  transportation: ["National Transportation Dataset (NTD)"],
+  structures: ["Structures - National Structures Dataset"],
+  boundaries: ["Boundaries - National Boundary Dataset"],
+  woodland: ["Woodland Tint"]
 };
 
 export function handleSafeDatasetSearch(query: string) {
@@ -284,7 +353,9 @@ export async function handleSafeDatasetImport(
     hydroFeatures,
     transportFeatures,
     soilFeatures,
-    floodResult
+    structureFeatures,
+    buildingFeatures,
+    boundaryFeatures
   ] =
     await Promise.all([
       handleSafeDatasetManifest(location.id, selectedDatasetIds),
@@ -301,14 +372,15 @@ export async function handleSafeDatasetImport(
       selectedDatasetIds.includes("soil")
         ? fetchSoilFeatures(location, 120).catch(() => [])
         : Promise.resolve([]),
-      selectedDatasetIds.includes("flood-hazard")
-        ? fetchFloodHazardFeatures(location, 300)
-            .then((features) => ({ features }))
-            .catch((error) => ({
-              features: [],
-              unavailableReason: getErrorMessage(error)
-            }))
-        : Promise.resolve({ features: [] })
+      selectedDatasetIds.includes("structures")
+        ? fetchStructureFeatures(location, 600).catch(() => [])
+        : Promise.resolve([]),
+      selectedDatasetIds.includes("buildings")
+        ? fetchBuildingFeatures(location, 450).catch(() => [])
+        : Promise.resolve([]),
+      selectedDatasetIds.includes("boundaries")
+        ? fetchBoundaryFeatures(location, 300).catch(() => [])
+        : Promise.resolve([])
     ]);
   const assets =
     options.persistAssets === false
@@ -322,7 +394,9 @@ export async function handleSafeDatasetImport(
     hydroFeatures,
     transportFeatures,
     soilFeatures,
-    floodResult,
+    structureFeatures,
+    buildingFeatures,
+    boundaryFeatures,
     assets
   );
   const baseLayers = terrainResult.baseLayers.filter(
@@ -380,6 +454,17 @@ function getRasterExportOptions(datasetId: SafeDatasetId) {
   }
 
   if (datasetId === "land-cover") {
+    return {
+      serviceUrl:
+        "https://di-nlcd.img.arcgis.com/arcgis/rest/services/USA_NLCD_Annual_LandCover/ImageServer/exportImage",
+      pixelType: "U8",
+      size: "1024,1024",
+      interpolation: "RSP_NearestNeighbor",
+      noData: "0"
+    };
+  }
+
+  if (datasetId === "woodland") {
     return {
       serviceUrl:
         "https://di-nlcd.img.arcgis.com/arcgis/rest/services/USA_NLCD_Annual_LandCover/ImageServer/exportImage",
@@ -452,6 +537,23 @@ async function getDatasetManifestSource(
     };
   }
 
+  if (datasetId === "woodland" && rasterExportOptions) {
+    const rasterExport = await fetchOptionalRasterExport(location, rasterExportOptions);
+    return {
+      datasetId,
+      label: datasetLabels[datasetId],
+      provider: "USGS MRLC NLCD Annual Land Cover ImageServer",
+      ...createRasterSourceStatus(rasterExport),
+      export: rasterExport.export,
+      derivedClasses: [
+        "Deciduous forest",
+        "Evergreen forest",
+        "Mixed forest",
+        "Shrub/scrub"
+      ]
+    };
+  }
+
   if (datasetId === "soil") {
     return {
       datasetId,
@@ -461,12 +563,35 @@ async function getDatasetManifestSource(
     };
   }
 
-  if (datasetId === "flood-hazard") {
+  if (datasetId === "structures") {
     return {
       datasetId,
       label: datasetLabels[datasetId],
-      provider: "FEMA National Flood Hazard Layer",
-      queryUrl: getFloodHazardQueryUrl(location, 300).toString()
+      provider: "USGS National Structures Dataset",
+      queryUrls: structureLayerConfig.map(({ layerId }) =>
+        getStructureQueryUrl(location, layerId, 30).toString()
+      )
+    };
+  }
+
+  if (datasetId === "buildings") {
+    return {
+      datasetId,
+      label: datasetLabels[datasetId],
+      provider: "OpenStreetMap Overpass API",
+      queryUrl: getBuildingQueryUrl(location, 30).toString(),
+      fields: ["building", "name", "height", "building:levels"]
+    };
+  }
+
+  if (datasetId === "boundaries") {
+    return {
+      datasetId,
+      label: datasetLabels[datasetId],
+      provider: "USGS National Boundary Dataset",
+      queryUrls: boundaryLayerConfig.map(({ layerId }) =>
+        getBoundaryQueryUrl(location, layerId, 30).toString()
+      )
     };
   }
 
@@ -735,23 +860,91 @@ function getSoilQueryUrl(location: SafeDatasetLocation, limit: number) {
   return url;
 }
 
-async function fetchFloodHazardFeatures(location: SafeDatasetLocation, limit: number) {
-  const payload = await fetchJson<PolygonResponse>(
-    getFloodHazardQueryUrl(location, limit)
+async function fetchStructureFeatures(location: SafeDatasetLocation, limit: number) {
+  const perLayerLimit = Math.max(10, Math.ceil(limit / structureLayerConfig.length));
+  const responses = await Promise.all(
+    structureLayerConfig.map(({ layerId, kind }) =>
+      fetchJson<PointResponse>(getStructureQueryUrl(location, layerId, perLayerLimit))
+        .then((response) =>
+          (response.features ?? []).map((feature) => ({ kind, feature }))
+        )
+        .catch(() => [])
+    )
   );
-  return payload.features ?? [];
+  return responses.flat();
 }
 
-function getFloodHazardQueryUrl(location: SafeDatasetLocation, limit: number) {
-  const url = new URL(
-    "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28/query"
+function getStructureQueryUrl(location: SafeDatasetLocation, layerId: number, limit: number) {
+  return getCartoFeatureQueryUrl(
+    location,
+    `https://carto.nationalmap.gov/arcgis/rest/services/structures/MapServer/${layerId}/query`,
+    "*",
+    limit
   );
+}
+
+async function fetchBuildingFeatures(location: SafeDatasetLocation, limit: number) {
+  const payload = await fetchOverpassJson<OverpassResponse>(
+    getBuildingOverpassQuery(location, limit)
+  );
+  return (payload.elements ?? [])
+    .filter(
+      (element) =>
+        element.type === "way" &&
+        Boolean(element.tags?.building) &&
+        Boolean(element.geometry) &&
+        (element.geometry?.length ?? 0) >= 4
+    )
+    .slice(0, limit);
+}
+
+function getBuildingQueryUrl(location: SafeDatasetLocation, limit: number) {
+  const url = new URL("https://overpass-api.de/api/interpreter");
+  url.searchParams.set("data", getBuildingOverpassQuery(location, limit));
+  return url;
+}
+
+function getBuildingOverpassQuery(location: SafeDatasetLocation, limit: number) {
+  return [
+    "[out:json][timeout:25];",
+    `way["building"](${location.bbox.south},${location.bbox.west},${location.bbox.north},${location.bbox.east});`,
+    `out tags geom ${limit};`
+  ].join("");
+}
+
+async function fetchBoundaryFeatures(location: SafeDatasetLocation, limit: number) {
+  const perLayerLimit = Math.max(10, Math.ceil(limit / boundaryLayerConfig.length));
+  const responses = await Promise.all(
+    boundaryLayerConfig.map(({ layerId, kind }) =>
+      fetchJson<PolygonResponse>(getBoundaryQueryUrl(location, layerId, perLayerLimit))
+        .then((response) =>
+          (response.features ?? []).map((feature) => ({ kind, feature }))
+        )
+        .catch(() => [])
+    )
+  );
+  return responses.flat();
+}
+
+function getBoundaryQueryUrl(location: SafeDatasetLocation, layerId: number, limit: number) {
+  return getCartoFeatureQueryUrl(
+    location,
+    `https://carto.nationalmap.gov/arcgis/rest/services/govunits/MapServer/${layerId}/query`,
+    "*",
+    limit
+  );
+}
+
+function getCartoFeatureQueryUrl(
+  location: SafeDatasetLocation,
+  serviceUrl: string,
+  outFields: string,
+  limit: number
+) {
+  const url = new URL(serviceUrl);
   url.searchParams.set("f", "json");
   url.searchParams.set("where", "1=1");
-  url.searchParams.set(
-    "outFields",
-    "FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE,V_DATUM,DEPTH,LEN_UNIT"
-  );
+  url.searchParams.set("outFields", outFields);
   url.searchParams.set("returnGeometry", "true");
   url.searchParams.set("geometry", bboxString(location));
   url.searchParams.set("geometryType", "esriGeometryEnvelope");
@@ -770,7 +963,15 @@ function createProviderLayers(
   hydroFeatures: HydroFeature[],
   transportFeatures: Array<{ kind: string; feature: TransportFeature }>,
   soilFeatures: PolygonFeature[],
-  floodResult: ProviderFeatureResult<PolygonFeature>,
+  structureFeatures: Array<{
+    kind: (typeof structureLayerConfig)[number]["kind"];
+    feature: PointFeature;
+  }>,
+  buildingFeatures: OverpassElement[],
+  boundaryFeatures: Array<{
+    kind: (typeof boundaryLayerConfig)[number]["kind"];
+    feature: PolygonFeature;
+  }>,
   assets: PersistedRasterAsset[]
 ): PlanningLayer[] {
   return datasetIds.map((datasetId) => {
@@ -790,8 +991,16 @@ function createProviderLayers(
       return createSoilLayer(project, location, soilFeatures);
     }
 
-    if (datasetId === "flood-hazard") {
-      return createFloodHazardLayer(project, location, floodResult);
+    if (datasetId === "structures") {
+      return createStructuresLayer(project, location, structureFeatures);
+    }
+
+    if (datasetId === "buildings") {
+      return createBuildingsLayer(project, location, buildingFeatures);
+    }
+
+    if (datasetId === "boundaries") {
+      return createBoundariesLayer(project, location, boundaryFeatures);
     }
 
     return createSourceReferenceLayer(
@@ -952,46 +1161,125 @@ function createSoilLayer(
   };
 }
 
-function createFloodHazardLayer(
+function createStructuresLayer(
   project: ProjectMetadata,
   location: SafeDatasetLocation,
-  floodResult: ProviderFeatureResult<PolygonFeature>
+  structureFeatures: Array<{
+    kind: (typeof structureLayerConfig)[number]["kind"];
+    feature: PointFeature;
+  }>
 ): PlanningLayer {
-  const features = floodResult.features.flatMap((feature, featureIndex) =>
-    polygonFeatureToVectorFeatures(
+  const features = structureFeatures.flatMap(({ kind, feature }, featureIndex) =>
+    pointFeatureToVectorFeature(
       project,
       feature,
       featureIndex,
-      "fema-flood-zone",
-      "FEMA National Flood Hazard Layer",
-      "Provider flood hazard polygon for regulatory flood risk and suitability review."
+      "structure",
+      kind,
+      "USGS National Structures Dataset",
+      "Provider structure point for services, access, emergency response, and site context review."
     )
   );
 
   return {
-    id: "safe-data-flood-hazard",
-    name: datasetLabels["flood-hazard"],
+    id: "safe-data-structures",
+    name: datasetLabels.structures,
     kind: "foundational-map",
     visible: true,
-    opacity: 0.5,
+    opacity: 0.82,
     reviewStatus: "draft",
-    category: "risk-suitability",
-    geometryType: "polygon",
-    source: createLayerSource(project, location, "flood-hazard"),
+    category: "infrastructure-utilities",
+    geometryType: "point",
+    source: createLayerSource(project, location, "structures"),
     style: {
-      stroke: "#7c4d78",
-      fill: "#b874a8",
-      strokeWidth: 1.25
+      stroke: "#724d3f",
+      fill: "#8b5c4a",
+      strokeWidth: 1.2,
+      symbol: "circle"
     },
-    legend: [{ label: "NFHL flood hazard zone", color: "#b874a8" }],
+    legend: [{ label: "TNM structure point", color: "#8b5c4a" }],
     features,
     planningImpactNotes: [
-      floodResult.unavailableReason
-        ? `FEMA NFHL coverage could not be checked for this AOI: ${floodResult.unavailableReason}`
-        : features.length > 0
-        ? `${features.length} flood hazard polygons imported from FEMA NFHL.`
-        : "No FEMA NFHL flood hazard polygons intersected this AOI; the layer is retained as a source-coverage record.",
-      "FEMA zones A, AE, AO, AH, and VE indicate mapped high-risk flood hazard areas; Zone X indicates lower or minimal mapped flood risk.",
+      `${features.length} structure points imported from the USGS National Structures Dataset.`,
+      `Target processing CRS: ${location.targetCrs}.`
+    ],
+    locked: true
+  };
+}
+
+function createBuildingsLayer(
+  project: ProjectMetadata,
+  location: SafeDatasetLocation,
+  buildingFeatures: OverpassElement[]
+): PlanningLayer {
+  const features = buildingFeatures.flatMap((feature, featureIndex) =>
+    overpassBuildingToVectorFeature(project, feature, featureIndex)
+  );
+
+  return {
+    id: "safe-data-buildings",
+    name: datasetLabels.buildings,
+    kind: "foundational-map",
+    visible: true,
+    opacity: 1,
+    reviewStatus: "draft",
+    category: "land-use-settlement",
+    geometryType: "polygon",
+    source: createLayerSource(project, location, "buildings"),
+    style: {
+      stroke: "#536172",
+      fill: "#8f9dad",
+      strokeWidth: 1
+    },
+    legend: [{ label: "OSM building footprint", color: "#8f9dad" }],
+    features,
+    planningImpactNotes: [
+      `${features.length} building footprints imported from OpenStreetMap Overpass.`,
+      "Height uses OSM height/levels when available; otherwise a type-based default is used.",
+      `Target processing CRS: ${location.targetCrs}.`
+    ],
+    locked: true
+  };
+}
+
+function createBoundariesLayer(
+  project: ProjectMetadata,
+  location: SafeDatasetLocation,
+  boundaryFeatures: Array<{
+    kind: (typeof boundaryLayerConfig)[number]["kind"];
+    feature: PolygonFeature;
+  }>
+): PlanningLayer {
+  const features = boundaryFeatures.flatMap(({ kind, feature }, featureIndex) =>
+    polygonFeatureToVectorFeatures(
+      project,
+      addLayerKindAttribute(feature, kind),
+      featureIndex,
+      "boundary",
+      "USGS National Boundary Dataset",
+      "Provider boundary polygon for jurisdiction, protected land, public land, and land-management review."
+    )
+  );
+
+  return {
+    id: "safe-data-boundaries",
+    name: datasetLabels.boundaries,
+    kind: "foundational-map",
+    visible: true,
+    opacity: 0.46,
+    reviewStatus: "draft",
+    category: "land-use-settlement",
+    geometryType: "polygon",
+    source: createLayerSource(project, location, "boundaries"),
+    style: {
+      stroke: "#665b9c",
+      fill: "#7a6fb0",
+      strokeWidth: 1
+    },
+    legend: [{ label: "TNM governmental or managed-land boundary", color: "#7a6fb0" }],
+    features,
+    planningImpactNotes: [
+      `${features.length} boundary polygons imported from the USGS National Boundary Dataset.`,
       `Target processing CRS: ${location.targetCrs}.`
     ],
     locked: true
@@ -1370,12 +1658,118 @@ function polygonFeatureToVectorFeatures(
   return vectorFeatures;
 }
 
+function pointFeatureToVectorFeature(
+  project: ProjectMetadata,
+  feature: PointFeature,
+  featureIndex: number,
+  idPrefix: string,
+  layerKind: string,
+  source: string,
+  planningImpact: string
+): VectorFeature[] {
+  const attributes = feature.attributes ?? {};
+  const point = feature.geometry;
+  if (!point) {
+    return [];
+  }
+  const coordinate = Array.isArray(point)
+    ? mapCoordinateToProject([Number(point[0]), Number(point[1])], project)
+    : mapCoordinateToProject([point.x, point.y], project);
+  const attributeEntries: Record<string, string> = { source, layerKind };
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+    attributeEntries[key] = String(value);
+  }
+
+  return [
+    {
+      id: `${idPrefix}-${layerKind}-${featureIndex + 1}`,
+      label: getNamedFeatureLabel(attributes, layerKind, featureIndex),
+      geometryType: "point",
+      coordinates: [coordinate],
+      attributes: attributeEntries,
+      planningImpact
+    }
+  ];
+}
+
+function overpassBuildingToVectorFeature(
+  project: ProjectMetadata,
+  feature: OverpassElement,
+  featureIndex: number
+): VectorFeature[] {
+  const geometry = feature.geometry ?? [];
+  const coordinates = geometry.map((point) =>
+    mapCoordinateToProject([point.lon, point.lat], project)
+  );
+  const ring = closeProjectRing(coordinates);
+  if (ring.length < 4) {
+    return [];
+  }
+
+  const tags = feature.tags ?? {};
+  const attributes: Record<string, string> = {
+    source: "OpenStreetMap Overpass API",
+    osmId: String(feature.id)
+  };
+  for (const [key, value] of Object.entries(tags)) {
+    attributes[key] = value;
+  }
+
+  return [
+    {
+      id: `building-${feature.id || featureIndex + 1}`,
+      label:
+        tags.name ??
+        tags["addr:housename"] ??
+        `${tags.building ?? "building"} ${featureIndex + 1}`,
+      geometryType: "polygon",
+      coordinates: ring,
+      attributes,
+      planningImpact:
+        "OSM building footprint for built-form massing, access, settlement pattern, and site context review."
+    }
+  ];
+}
+
+function closeProjectRing(coordinates: Coordinate[]) {
+  const first = coordinates[0];
+  const last = coordinates[coordinates.length - 1];
+  if (!first || !last) {
+    return coordinates;
+  }
+
+  if (first[0] === last[0] && first[1] === last[1]) {
+    return coordinates;
+  }
+
+  return [...coordinates, first];
+}
+
+function addLayerKindAttribute(feature: PolygonFeature, layerKind: string): PolygonFeature {
+  return {
+    ...feature,
+    attributes: {
+      ...feature.attributes,
+      layerKind
+    }
+  };
+}
+
 function getPolygonFeatureLabel(
   attributes: Record<string, string | number | null | undefined>,
   fallbackPrefix: string,
   featureIndex: number
 ) {
   const candidate =
+    attributes.name ??
+    attributes.gnis_name ??
+    attributes.county_name ??
+    attributes.incorp_name ??
+    attributes.unit_name ??
+    attributes.unit_name ??
     attributes.musym ??
     attributes.nationalmusym ??
     attributes.mukey ??
@@ -1388,6 +1782,29 @@ function getPolygonFeatureLabel(
     return String(candidate);
   }
   return `${fallbackPrefix.replace(/-/g, " ")} ${featureIndex + 1}`;
+}
+
+function getNamedFeatureLabel(
+  attributes: Record<string, string | number | null | undefined>,
+  layerKind: string,
+  featureIndex: number
+) {
+  const candidate =
+    attributes.name ??
+    attributes.gnis_name ??
+    attributes.feature_name ??
+    attributes.struct_name ??
+    attributes.featureclass ??
+    attributes.poi_id ??
+    attributes.source_featureid ??
+    attributes.sourcefeatureid;
+  if (typeof candidate === "string" && candidate.trim()) {
+    return candidate.trim();
+  }
+  if (typeof candidate === "number") {
+    return String(candidate);
+  }
+  return `${layerKind.replace(/-/g, " ")} ${featureIndex + 1}`;
 }
 
 function getTransportFeatureLabel(
@@ -1480,6 +1897,45 @@ async function fetchJson<T>(url: URL): Promise<T> {
     return (await response.json()) as T;
   } catch (error) {
     throw formatProviderFetchError(error, url.hostname, jsonRequestTimeoutMs);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchOverpassJson<T>(query: string): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), jsonRequestTimeoutMs);
+  const endpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter"
+  ];
+
+  try {
+    let lastError: Error | null = null;
+    for (const endpoint of endpoints) {
+      const url = new URL(endpoint);
+      try {
+        const response = await fetch(url, {
+          body: new URLSearchParams({ data: query }),
+          headers: {
+            accept: "application/json",
+            "content-type": "application/x-www-form-urlencoded",
+            "user-agent": "Landschaft/0.1 (local planning preview; contact: local-dev)"
+          },
+          method: "POST",
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(`${url.hostname} request failed: ${response.status}`);
+        }
+        return (await response.json()) as T;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+    throw lastError ?? new Error("Overpass request failed.");
+  } catch (error) {
+    throw formatProviderFetchError(error, "overpass", jsonRequestTimeoutMs);
   } finally {
     clearTimeout(timeout);
   }
@@ -1602,13 +2058,16 @@ function getLayerCategory(datasetId: SafeDatasetId): PlanningLayer["category"] {
     case "hydrography":
       return "hydrology";
     case "transportation":
+    case "structures":
       return "infrastructure-utilities";
     case "soil":
       return "soil";
+    case "buildings":
+    case "boundaries":
+      return "land-use-settlement";
     case "land-cover":
+    case "woodland":
       return "ecology-vegetation";
-    case "flood-hazard":
-      return "risk-suitability";
     default:
       return "designer-created";
   }
@@ -1630,20 +2089,34 @@ function getLayerColor(datasetId: SafeDatasetId) {
       return "#b89655";
     case "land-cover":
       return "#5d8c4a";
-    case "flood-hazard":
-      return "#b874a8";
+    case "structures":
+      return "#8b5c4a";
+    case "buildings":
+      return "#8f9dad";
+    case "boundaries":
+      return "#7a6fb0";
+    case "woodland":
+      return "#3f7a4f";
     default:
       return "#68706a";
   }
 }
 
 function isRasterDataset(datasetId: SafeDatasetId) {
-  return datasetId === "naip-ortho" || datasetId === "dem-3dep" || datasetId === "land-cover";
+  return (
+    datasetId === "naip-ortho" ||
+    datasetId === "dem-3dep" ||
+    datasetId === "land-cover" ||
+    datasetId === "woodland"
+  );
 }
 
 function getDefaultProviderLayerOpacity(datasetId: SafeDatasetId) {
   if (datasetId === "land-cover") {
     return 0.72;
+  }
+  if (datasetId === "woodland") {
+    return 0.5;
   }
   return isRasterDataset(datasetId) ? 1 : 0.68;
 }

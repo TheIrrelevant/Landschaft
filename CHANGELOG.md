@@ -1,15 +1,18 @@
 ---
 type: changelog
 description: Release history for the Landschaft landscape planning editor.
-last-updated: 2026-07-01
+last-updated: 2026-07-03
 last-model: codex-gpt-5
-last-change: log non-fatal raster export failures during safe import
+last-change: add structures, boundaries, woodland, and building safe dataset options
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Added Structures, Boundaries, Buildings, and a woodland mask derived from NLCD forest and shrub/scrub classes to the live provider import flow.
+- Rendered woodland, structures, buildings, and boundary fills as terrain-aware 3D overlays with stable 1:1 scale behavior and live boundary opacity updates.
+- Removed the FEMA flood hazard option from the safe dataset import flow.
 - Kept safe dataset imports running when optional raster exports such as NAIP time out; unavailable rasters now remain as source-reference layers instead of failing the full import.
 - Filled soil polygons with deterministic soil-type colors and made layer opacity update live while editing the opacity input.
 - Surface FEMA NFHL service failures separately from valid empty flood coverage so `0 features` no longer hides provider connectivity failures.

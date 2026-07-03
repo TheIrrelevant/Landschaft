@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Zustand store for Landschaft editor layers and selected area state.
- * last-updated: 2026-07-01
+ * last-updated: 2026-07-03
  * last-model: codex-gpt-5
- * last-change: report imported layers and feature counts in safe dataset status
+ * last-change: add structures, boundaries, and woodland safe dataset options
  * ---end-metadata---
  */
 import {
@@ -46,7 +46,10 @@ type SafeDatasetId =
   | "transportation"
   | "soil"
   | "land-cover"
-  | "flood-hazard";
+  | "structures"
+  | "buildings"
+  | "boundaries"
+  | "woodland";
 type SafeDatasetImportStatus = "idle" | "ready" | "importing" | "complete" | "error";
 const safeDatasetBridgeUrl =
   import.meta.env.VITE_LANDSCHAFT_MCP_HTTP_URL ?? "http://127.0.0.1:8787";
@@ -217,10 +220,25 @@ const safeDatasetCatalog: Record<
     provider: "USGS MRLC NLCD",
     category: "ecology-vegetation"
   },
-  "flood-hazard": {
-    label: "FEMA flood hazard",
-    provider: "FEMA National Flood Hazard Layer",
-    category: "risk-suitability"
+  structures: {
+    label: "Structures",
+    provider: "USGS National Structures Dataset",
+    category: "infrastructure-utilities"
+  },
+  buildings: {
+    label: "Buildings",
+    provider: "OpenStreetMap Overpass API",
+    category: "land-use-settlement"
+  },
+  boundaries: {
+    label: "Boundaries",
+    provider: "USGS National Boundary Dataset",
+    category: "land-use-settlement"
+  },
+  woodland: {
+    label: "Woodland",
+    provider: "USGS Woodland Tint / USGS Topo",
+    category: "ecology-vegetation"
   }
 };
 
@@ -237,7 +255,7 @@ const safeDatasetLocations: SafeDatasetLocation[] = [
       north: 40.028
     },
     targetCrs: "EPSG:26913",
-    dataSource: "USGS The National Map / NAIP / USDA NRCS / FEMA",
+    dataSource: "USGS The National Map / NAIP / USDA NRCS",
     datasets: [
       "naip-ortho",
       "dem-3dep",
@@ -246,7 +264,10 @@ const safeDatasetLocations: SafeDatasetLocation[] = [
       "transportation",
       "soil",
       "land-cover",
-      "flood-hazard"
+      "structures",
+      "buildings",
+      "boundaries",
+      "woodland"
     ]
   }
 ];
@@ -654,8 +675,12 @@ function createSafeDatasetLayers(
         ? "raster"
         : datasetId === "usgs-contours" || datasetId === "transportation"
         ? "line"
-        : datasetId === "soil" || datasetId === "flood-hazard"
+        : datasetId === "soil" || datasetId === "boundaries"
         ? "polygon"
+        : datasetId === "buildings"
+        ? "polygon"
+        : datasetId === "structures"
+        ? "point"
         : "mixed",
       source: {
         sourceName: `${dataset.provider} / ${location.name}`,
@@ -697,20 +722,34 @@ function getSafeDatasetColor(datasetId: SafeDatasetId) {
       return "#b89655";
     case "land-cover":
       return "#5d8c4a";
-    case "flood-hazard":
-      return "#b874a8";
+    case "structures":
+      return "#8b5c4a";
+    case "buildings":
+      return "#8f9dad";
+    case "boundaries":
+      return "#7a6fb0";
+    case "woodland":
+      return "#3f7a4f";
     default:
       return "#68706a";
   }
 }
 
 function isSafeDatasetRaster(datasetId: SafeDatasetId) {
-  return datasetId === "naip-ortho" || datasetId === "dem-3dep" || datasetId === "land-cover";
+  return (
+    datasetId === "naip-ortho" ||
+    datasetId === "dem-3dep" ||
+    datasetId === "land-cover" ||
+    datasetId === "woodland"
+  );
 }
 
 function getDefaultSafeDatasetOpacity(datasetId: SafeDatasetId) {
   if (datasetId === "land-cover") {
     return 0.72;
+  }
+  if (datasetId === "woodland") {
+    return 0.68;
   }
   return isSafeDatasetRaster(datasetId) ? 1 : 0.68;
 }

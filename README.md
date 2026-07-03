@@ -10,7 +10,7 @@ metadata:
   version: "0.1.0"
   stack: React 19, TypeScript 5.9, Vite 7, Three.js 0.184, Zustand, Turf, Proj4, MCP
   status: active-demo
-  last-updated: 2026-07-02
+  last-updated: 2026-07-03
 compatibility: Requires Node.js 22+ and npm 10+. Hosted provider imports require a Landschaft MCP HTTP backend.
 ---
 
@@ -47,7 +47,10 @@ The static demo includes every available safe dataset option from the Location D
 | **Transportation** | Road, trail, and transportation line features |
 | **USDA soils** | Soil map unit polygon features |
 | **NLCD land cover** | Clipped provider GeoTIFF raster |
-| **FEMA flood hazard** | Flood hazard layer and provider availability notes |
+| **Structures** | Public facilities and civic point features |
+| **Boundaries** | Administrative and public-land boundary polygons |
+| **Woodland** | NLCD-derived forest and shrub/scrub mask |
+| **Buildings** | OSM building footprint polygons where available |
 
 Raster demo assets are served from:
 
@@ -64,7 +67,7 @@ Landschaft is organized around three production surfaces:
 | Surface | Output |
 | --- | --- |
 | **Terrain Workspace** | Project extent, generated terrain model, terrain mesh, orthographic 2D plan view, and 3D review mode |
-| **Safe Dataset Import** | Provider-backed layers for raster, contour, hydrography, transportation, soil, land cover, and flood evidence |
+| **Safe Dataset Import** | Provider-backed layers for raster, contour, hydrography, transportation, soil, land cover, structures, boundaries, OSM buildings, and NLCD-derived woodland evidence |
 | **Planning Evidence Loop** | Structured map evidence, draft LCA layers, review status, and MCP read/write tools for controlled agent workflows |
 
 The editor treats vector data as the planning source of truth. Raster layers provide visual context, while editable features, evidence records, review status, and project-metre coordinates remain structured and auditable.
@@ -79,7 +82,7 @@ The first workflow starts from a curated safe location.
 
 - Search supported test locations.
 - Select provider datasets.
-- Load a project extent, terrain, provider rasters, and vector evidence.
+- Load a project extent, terrain, provider rasters, structures, boundaries, OSM building footprints, NLCD-derived woodland masks, and vector evidence.
 - Preserve provider source metadata and accuracy notes on each layer.
 
 The public Pages demo uses static Boulder Flatirons data. Development and hosted deployments can call the MCP HTTP bridge for live provider imports.

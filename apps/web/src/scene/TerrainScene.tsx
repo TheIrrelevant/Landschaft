@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: fill soil polygons with deterministic soil-type colors
+ * last-change: cap one-to-one render scale for browser stability
  * ---end-metadata---
  */
 import {
@@ -18,7 +18,7 @@ import {
   type ThreeToJSXElements,
   useThree
 } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { fromArrayBuffer } from "geotiff";
 import {
   ACESFilmicToneMapping,
@@ -98,15 +98,15 @@ const RENDER_TERRAIN_GRID_SIZE = 129;
 const CONTOUR_LEVELS = 14;
 const CONTOUR_LIFT = 0.012;
 const FIT_VERTICAL_EXAGGERATION = 2.4;
-const ONE_TO_ONE_VERTICAL_EXAGGERATION = 4.5;
-// Solid base depth BELOW the terrain, expressed in real metres (scaled by
-// displayScale into the scene). ~40 m of "geological block" under the lowest
-// point reads as a carved model.
-const BASE_DEPTH_METERS = 40;
 const GROUND_GRID_OFFSET = 0.08;
 const RASTER_DRAPE_BASE_LIFT = 0.055;
 const LAYER_STACK_LIFT_STEP = 0.035;
 const VECTOR_OVERLAY_LIFT_BONUS = 0.08;
+const BOUNDARY_LINE_LIFT = 0.018;
+const MAX_CAMERA_RADIUS = 320;
+const MAX_ONE_TO_ONE_RENDER_SPAN = TARGET_SCENE_SPAN;
+const MAX_ONE_TO_ONE_WOODLAND_MARKERS = 64;
+const MAX_ONE_TO_ONE_VECTOR_FEATURES = 420;
 /** Only 100% opacity fully masks raster layers below in the stack. */
 const FULL_LAYER_OPACITY = 1;
 const TERRAIN_DRAPED_RASTER_LAYER_IDS = new Set([
@@ -127,15 +127,61 @@ const SOIL_COLOR_PALETTE = [
   "#a7b86c",
   "#b47c5f"
 ];
-
+const BOUNDARY_KIND_COLORS: Record<string, string> = {
+  county: "#7667b0",
+  "incorporated-place": "#8d6aa8",
+  "unincorporated-place": "#9a7ab4",
+  "national-park": "#5f8f5c",
+  "national-monument": "#7f8f5c",
+  "national-forest": "#4f8a63",
+  "national-wilderness": "#3f7f6b",
+  "national-grassland": "#8da05a",
+  "us-fish-wildlife-service": "#4f8f8a",
+  "bureau-of-land-management": "#b09355"
+};
+const STRUCTURE_KIND_COLORS: Record<string, string> = {
+  cemetery: "#757575",
+  "post-office": "#8b6f42",
+  "city-town-hall": "#6c5a9e",
+  courthouse: "#6c5a9e",
+  "historic-site": "#9a7845",
+  hospital: "#b84e58",
+  "ambulance-service": "#c6604f",
+  "fire-station": "#bf4a3c",
+  "police-station": "#3f5f93",
+  "college-university": "#4c75a3",
+  "technical-school": "#4c75a3",
+  school: "#4c75a3",
+  campground: "#5f8a52",
+  trailhead: "#5f8a52",
+  cabin: "#8b5f3d",
+  shelter: "#7b6345",
+  "picnic-area": "#6f8f4f",
+  headquarters: "#6c5a9e",
+  "visitor-center": "#5c8f8a",
+  "ranger-station": "#4f7a55"
+};
+const BUILDING_TYPE_COLORS: Record<string, string> = {
+  school: "#4c75a3",
+  university: "#4c75a3",
+  college: "#4c75a3",
+  hospital: "#b84e58",
+  public: "#6c5a9e",
+  civic: "#6c5a9e",
+  commercial: "#8b7a50",
+  retail: "#9a8050",
+  industrial: "#6f7378",
+  warehouse: "#6f7378",
+  residential: "#8f9dad",
+  house: "#9a8a78",
+  cabin: "#8b5f3d",
+  yes: "#8f9dad"
+};
 /**
  * The terrain coordinate space.
  *
- * DATA stays in true metres (terrain.width/depth/elevation). `displayScale` is a
- * single uniform factor (horizontal == vertical, so proportions are never
- * distorted) that maps metres -> scene units. By default it fits the terrain
- * into TARGET_SCENE_SPAN so very large maps don't produce a huge scene; set it
- * to 1 for true 1:1 viewing. Scene origin (0,0) is the terrain centre.
+ * DATA stays in true metres (terrain.width/depth/elevation). Render height uses
+ * a local datum so absolute elevations do not create a huge solid block.
  */
 type TerrainSpace = {
   /** metres -> scene-units factor (uniform on all axes) */
@@ -147,9 +193,15 @@ type TerrainSpace = {
   sizeZ: number;
   /** elevation span in metres */
   rangeMeters: number;
-  /** solid base position in scene units below absolute elevation zero */
+  /** absolute source elevation used as local render datum */
+  minElevationMeters: number;
+  /** local surface datum in scene units above the solid base */
+  localDatumY: number;
+  /** solid base position in scene units */
   baseY: number;
 };
+
+const LOCAL_TERRAIN_DATUM_METERS = 42;
 
 type ProjectSpace = {
   displayScale: number;
@@ -172,7 +224,9 @@ function getTerrainSpace(
     sizeX: terrain.width * displayScale,
     sizeZ: terrain.depth * displayScale,
     rangeMeters,
-    baseY: -BASE_DEPTH_METERS * displayScale
+    minElevationMeters: terrain.minElevation,
+    localDatumY: LOCAL_TERRAIN_DATUM_METERS * displayScale,
+    baseY: 0
   };
 }
 
@@ -189,6 +243,38 @@ function getProjectSpace(project: ProjectMetadata, scaleOverride?: number): Proj
     sizeX: project.realWorldExtentMeters.width * displayScale,
     sizeZ: project.realWorldExtentMeters.depth * displayScale
   };
+}
+
+function getTerrainScaleOverride(
+  terrain: TerrainModel,
+  viewScaleMode: "fit" | "1:1"
+) {
+  if (viewScaleMode !== "1:1") {
+    return undefined;
+  }
+
+  const maxMeters = Math.max(terrain.width, terrain.depth, 1);
+  return Math.min(1, MAX_ONE_TO_ONE_RENDER_SPAN / maxMeters);
+}
+
+function getProjectScaleOverride(
+  project: ProjectMetadata,
+  viewScaleMode: "fit" | "1:1"
+) {
+  if (viewScaleMode !== "1:1") {
+    return undefined;
+  }
+
+  const maxMeters = Math.max(
+    project.realWorldExtentMeters.width,
+    project.realWorldExtentMeters.depth,
+    1
+  );
+  return Math.min(1, MAX_ONE_TO_ONE_RENDER_SPAN / maxMeters);
+}
+
+function getCanonicalTerrainGeometrySpace(terrain: TerrainModel) {
+  return getTerrainSpace(terrain, 1, FIT_VERTICAL_EXAGGERATION);
 }
 
 type Vec3 = [number, number, number];
@@ -360,8 +446,8 @@ function normalizedGridToLocal(
 }
 
 /**
- * Surface height for a cell, in scene units. Source elevation values stay on
- * their absolute metre datum instead of being normalized to the terrain minimum.
+ * Surface height for a cell, in scene units. Source elevation values remain
+ * absolute in data, but render height is normalized to a local datum.
  */
 function sampleHeightAt(
   terrain: TerrainModel,
@@ -374,7 +460,10 @@ function sampleHeightAt(
 }
 
 function elevationToSceneHeight(elevation: number, space: TerrainSpace) {
-  return elevation * space.displayScale * space.verticalScale;
+  return (
+    space.localDatumY +
+    (elevation - space.minElevationMeters) * space.displayScale * space.verticalScale
+  );
 }
 
 function sampleElevationAt(terrain: TerrainModel, u: number, v: number) {
@@ -485,10 +574,8 @@ function buildContourGeometry(terrain: TerrainModel, space: TerrainSpace) {
   const grid = getRenderGridSize(terrain);
   const positions: number[] = [];
 
-  const surfaceMin =
-    terrain.minElevation * space.displayScale * space.verticalScale;
-  const surfaceMax =
-    terrain.maxElevation * space.displayScale * space.verticalScale;
+  const surfaceMin = elevationToSceneHeight(terrain.minElevation, space);
+  const surfaceMax = elevationToSceneHeight(terrain.maxElevation, space);
   const step = (surfaceMax - surfaceMin) / (CONTOUR_LEVELS + 1);
   const lift = CONTOUR_LIFT * Math.max(space.displayScale, 0.0001) * 50;
 
@@ -707,9 +794,17 @@ function isLandCoverGeoTiffUrl(url: string) {
   return /land-cover|nlcd/i.test(url);
 }
 
+function isWoodlandGeoTiffUrl(url: string) {
+  return /woodland/i.test(url);
+}
+
 async function loadGeoTiffTexture(url: string) {
   if (isOrthophotoGeoTiffUrl(url)) {
     return loadGeoTiffRgbTexture(url);
+  }
+
+  if (isWoodlandGeoTiffUrl(url)) {
+    return loadGeoTiffWoodlandTexture(url);
   }
 
   if (isLandCoverGeoTiffUrl(url)) {
@@ -827,6 +922,14 @@ const NLCD_LAND_COVER_COLORS: Record<number, [number, number, number, number]> =
   95: [108, 159, 184, 220]
 };
 
+const NLCD_WOODLAND_CLASSES = new Set([41, 42, 43, 52]);
+type WoodlandMarkerKind = "deciduous" | "evergreen" | "mixed" | "shrub";
+type WoodlandMarker = {
+  id: string;
+  kind: WoodlandMarkerKind;
+  coordinate: Coordinate;
+};
+
 async function loadGeoTiffLandCoverTexture(url: string) {
   const response = await fetch(url);
   if (!response.ok) {
@@ -868,6 +971,152 @@ async function loadGeoTiffLandCoverTexture(url: string) {
   texture.anisotropy = 4;
   texture.needsUpdate = true;
   return texture;
+}
+
+async function loadGeoTiffWoodlandTexture(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`GeoTIFF texture request failed: ${response.status}`);
+  }
+
+  const tiff = await fromArrayBuffer(await response.arrayBuffer());
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const raster = (await image.readRasters({
+    interleave: true,
+    samples: [0]
+  })) as ArrayLike<number>;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("GeoTIFF texture canvas could not be created.");
+  }
+
+  const imageData = context.createImageData(width, height);
+  for (let index = 0; index < width * height; index += 1) {
+    const value = Number(raster[index]);
+    const offset = index * 4;
+    if (NLCD_WOODLAND_CLASSES.has(value)) {
+      imageData.data[offset] = 42;
+      imageData.data[offset + 1] = 112;
+      imageData.data[offset + 2] = 61;
+      imageData.data[offset + 3] = value === 52 ? 165 : 230;
+    } else {
+      imageData.data[offset + 3] = 0;
+    }
+  }
+  context.putImageData(imageData, 0, 0);
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.flipY = true;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+async function loadWoodlandMarkers(
+  url: string,
+  georef: RasterGeoreference,
+  maxMarkers = 620
+): Promise<WoodlandMarker[]> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`GeoTIFF woodland request failed: ${response.status}`);
+  }
+
+  const tiff = await fromArrayBuffer(await response.arrayBuffer());
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const raster = (await image.readRasters({
+    interleave: true,
+    samples: [0]
+  })) as ArrayLike<number>;
+  const markers: WoodlandMarker[] = [];
+  const sampleStep = Math.max(10, Math.floor(Math.max(width, height) / 58));
+  const rasterWidth = Math.max(georef.projectMax[0] - georef.projectMin[0], 0.01);
+  const rasterDepth = Math.max(georef.projectMax[1] - georef.projectMin[1], 0.01);
+
+  for (let y = Math.floor(sampleStep / 2); y < height; y += sampleStep) {
+    for (let x = Math.floor(sampleStep / 2); x < width; x += sampleStep) {
+      const value = Number(raster[y * width + x]);
+      if (!NLCD_WOODLAND_CLASSES.has(value)) {
+        continue;
+      }
+
+      const hash = (x * 73856093) ^ (y * 19349663);
+      if (Math.abs(hash) % 3 === 0) {
+        continue;
+      }
+
+      const u = x / Math.max(width - 1, 1);
+      const v = y / Math.max(height - 1, 1);
+      markers.push({
+        id: `woodland-${x}-${y}`,
+        kind: getWoodlandMarkerKind(value),
+        coordinate: [
+          georef.projectMin[0] + u * rasterWidth,
+          georef.projectMin[1] + v * rasterDepth
+        ]
+      });
+
+      if (markers.length >= maxMarkers) {
+        return markers;
+      }
+    }
+  }
+
+  return markers;
+}
+
+function getWoodlandMarkerKind(value: number): WoodlandMarkerKind {
+  if (value === 42) {
+    return "evergreen";
+  }
+  if (value === 43) {
+    return "mixed";
+  }
+  if (value === 52) {
+    return "shrub";
+  }
+  return "deciduous";
+}
+
+function useWoodlandMarkers(
+  url: string | null,
+  georef: RasterGeoreference | undefined
+) {
+  const [markers, setMarkers] = useState<WoodlandMarker[]>([]);
+
+  useEffect(() => {
+    if (!url || !georef) {
+      setMarkers([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    loadWoodlandMarkers(url, georef)
+      .then((nextMarkers) => {
+        if (!cancelled) {
+          setMarkers(nextMarkers);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMarkers([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [url, georef]);
+
+  return markers;
 }
 
 async function loadGeoTiffScalarTexture(url: string) {
@@ -954,7 +1203,10 @@ function TerrainMesh({
   terrain: TerrainModel;
   space: TerrainSpace;
 }) {
-  const geometry = useMemo(() => buildTerrainGeometry(terrain, space), [terrain, space]);
+  const geometry = useMemo(
+    () => buildTerrainGeometry(terrain, getCanonicalTerrainGeometrySpace(terrain)),
+    [terrain]
+  );
   const materials = useMemo(() => {
     const topSurface = new THREE.MeshLambertNodeMaterial({
       color: new Color(TERRAIN_CLAY),
@@ -972,7 +1224,14 @@ function TerrainMesh({
     return [topSurface, solid];
   }, [hideTopSurface]);
 
-  return <mesh castShadow geometry={geometry} material={materials} />;
+  return (
+    <mesh
+      castShadow
+      geometry={geometry}
+      material={materials}
+      scale={[space.displayScale, space.displayScale, space.displayScale]}
+    />
+  );
 }
 
 function OrthophotoBaseMap({
@@ -991,7 +1250,7 @@ function OrthophotoBaseMap({
   viewScaleMode: "fit" | "1:1";
 }) {
   const space = useMemo(
-    () => getProjectSpace(project, viewScaleMode === "1:1" ? 1 : undefined),
+    () => getProjectSpace(project, getProjectScaleOverride(project, viewScaleMode)),
     [project, viewScaleMode]
   );
   const materials = useMemo(() => {
@@ -1028,11 +1287,26 @@ function OrthophotoBaseMap({
   );
 }
 
-function ContourLines({ terrain, space }: { terrain: TerrainModel; space: TerrainSpace }) {
-  const geometry = useMemo(() => buildContourGeometry(terrain, space), [terrain, space]);
+function ContourLines({
+  space,
+  terrain,
+  visible
+}: {
+  space: TerrainSpace;
+  terrain: TerrainModel;
+  visible: boolean;
+}) {
+  const geometry = useMemo(
+    () => buildContourGeometry(terrain, getCanonicalTerrainGeometrySpace(terrain)),
+    [terrain]
+  );
 
   return (
-    <lineSegments geometry={geometry}>
+    <lineSegments
+      geometry={geometry}
+      scale={[space.displayScale, space.displayScale, space.displayScale]}
+      visible={visible}
+    >
       <lineBasicMaterial color={CONTOUR_COLOR} transparent opacity={0.6} />
     </lineSegments>
   );
@@ -1101,17 +1375,23 @@ function GroundPlane({ baseY }: { baseY: number }) {
 
 function TerrainLayerContent({
   hideTopSurface,
+  showContours,
   space,
   terrain
 }: {
   hideTopSurface: boolean;
+  showContours: boolean;
   space: TerrainSpace;
   terrain: TerrainModel;
 }) {
   return (
     <>
       <TerrainMesh hideTopSurface={hideTopSurface} terrain={terrain} space={space} />
-      {hideTopSurface ? null : <ContourLines terrain={terrain} space={space} />}
+      <ContourLines
+        terrain={terrain}
+        space={space}
+        visible={!hideTopSurface && showContours}
+      />
     </>
   );
 }
@@ -1126,7 +1406,6 @@ function OrthophotoLayerContent({
   const layers = useEditorStore((state) => state.layers);
   const project = useEditorStore((state) => state.project);
   const orthophotoPreviewUrl = useEditorStore((state) => state.orthophotoPreviewUrl);
-  const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
   const orthophotoTexture = useOrthophotoTexture(orthophotoPreviewUrl);
   const orthophotoLayer = getLayer(layers, "orthophoto-base");
 
@@ -1141,7 +1420,7 @@ function OrthophotoLayerContent({
       project={project}
       renderOrder={renderOrder}
       texture={orthophotoTexture}
-      viewScaleMode={viewScaleMode}
+      viewScaleMode="fit"
     />
   );
 }
@@ -1325,7 +1604,8 @@ function DrapedRasterMesh({
   renderOrder,
   stackLift,
   terrain,
-  terrainSpace
+  terrainSpace,
+  visible
 }: {
   georef: RasterGeoreference;
   layer: PlanningLayer;
@@ -1334,6 +1614,7 @@ function DrapedRasterMesh({
   stackLift: number;
   terrain: TerrainModel;
   terrainSpace: TerrainSpace;
+  visible: boolean;
 }) {
   const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
   const materialOpacity = getDrapedRasterMaterialOpacity(layer);
@@ -1355,7 +1636,7 @@ function DrapedRasterMesh({
   }
 
   return (
-    <mesh geometry={geometry} renderOrder={renderOrder}>
+    <mesh geometry={geometry} renderOrder={renderOrder} visible={visible}>
       <meshBasicNodeMaterial
         color={new Color("#ffffff")}
         depthTest={false}
@@ -1364,6 +1645,392 @@ function DrapedRasterMesh({
         opacity={materialOpacity}
         side={FrontSide}
         transparent={!fullyOpaque}
+      />
+    </mesh>
+  );
+}
+
+function WoodlandModelLayer({
+  layer,
+  project,
+  projectSpace,
+  renderOrder,
+  terrain,
+  terrainGenerated,
+  terrainSpace,
+  viewScaleMode
+}: {
+  layer: PlanningLayer;
+  project: ProjectMetadata;
+  projectSpace: ProjectSpace;
+  renderOrder: number;
+  terrain: TerrainModel;
+  terrainGenerated: boolean;
+  terrainSpace: TerrainSpace;
+  viewScaleMode: "fit" | "1:1";
+}) {
+  const markers = useWoodlandMarkers(
+    layer.rasterPreviewUrl ?? null,
+    layer.rasterGeoreference
+  );
+  const visibleMarkers =
+    viewScaleMode === "1:1"
+      ? markers.slice(0, MAX_ONE_TO_ONE_WOODLAND_MARKERS)
+      : markers;
+  const markerScale =
+    viewScaleMode === "1:1" ? 5.5 : clamp(terrainSpace.displayScale * 95, 0.34, 1.25);
+  const lift = RASTER_DRAPE_BASE_LIFT + VECTOR_OVERLAY_LIFT_BONUS + markerScale * 0.55;
+
+  if (!visibleMarkers.length) {
+    return null;
+  }
+
+  return (
+    <group renderOrder={renderOrder + 20}>
+      {visibleMarkers.map((marker) => {
+        const position = projectCoordinateToScene(
+          marker.coordinate,
+          project,
+          projectSpace,
+          terrain,
+          terrainSpace,
+          terrainGenerated,
+          lift
+        );
+
+        return (
+          <WoodlandMarkerMesh
+            key={marker.id}
+            kind={marker.kind}
+            position={position}
+            renderOrder={renderOrder + 20}
+            scale={markerScale}
+          />
+        );
+      })}
+    </group>
+  );
+}
+
+function WoodlandMarkerMesh({
+  kind,
+  position,
+  renderOrder,
+  scale
+}: {
+  kind: WoodlandMarkerKind;
+  position: [number, number, number];
+  renderOrder: number;
+  scale: number;
+}) {
+  const fill = new Color("#5f5f5f");
+  const dark = new Color("#474747");
+  const materialProps = {
+    depthTest: true,
+    depthWrite: true
+  };
+
+  if (kind === "evergreen") {
+    return (
+      <group frustumCulled={false} position={position} renderOrder={renderOrder}>
+        <mesh
+          frustumCulled={false}
+          position={[0, scale * 0.58, 0]}
+          renderOrder={renderOrder}
+        >
+          <coneGeometry args={[scale * 0.42, scale * 1.15, 5]} />
+          <meshBasicNodeMaterial color={fill} {...materialProps} />
+        </mesh>
+        <mesh
+          frustumCulled={false}
+          position={[0, scale * 0.16, 0]}
+          renderOrder={renderOrder}
+        >
+          <cylinderGeometry args={[scale * 0.07, scale * 0.09, scale * 0.34, 5]} />
+          <meshBasicNodeMaterial color={dark} {...materialProps} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (kind === "shrub") {
+    return (
+      <group frustumCulled={false} position={position} renderOrder={renderOrder}>
+        <mesh
+          frustumCulled={false}
+          position={[0, scale * 0.18, 0]}
+          renderOrder={renderOrder}
+          scale={[1.2, 0.42, 0.9]}
+        >
+          <dodecahedronGeometry args={[scale * 0.36, 0]} />
+          <meshBasicNodeMaterial color={fill} {...materialProps} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (kind === "mixed") {
+    return (
+      <group frustumCulled={false} position={position} renderOrder={renderOrder}>
+        <mesh
+          frustumCulled={false}
+          position={[-scale * 0.16, scale * 0.42, 0]}
+          renderOrder={renderOrder}
+        >
+          <sphereGeometry args={[scale * 0.28, 7, 5]} />
+          <meshBasicNodeMaterial color={fill} {...materialProps} />
+        </mesh>
+        <mesh
+          frustumCulled={false}
+          position={[scale * 0.18, scale * 0.48, 0]}
+          renderOrder={renderOrder}
+        >
+          <coneGeometry args={[scale * 0.28, scale * 0.78, 5]} />
+          <meshBasicNodeMaterial color={fill} {...materialProps} />
+        </mesh>
+      </group>
+    );
+  }
+
+  return (
+    <group frustumCulled={false} position={position} renderOrder={renderOrder}>
+      <mesh
+        frustumCulled={false}
+        position={[0, scale * 0.42, 0]}
+        renderOrder={renderOrder}
+      >
+        <sphereGeometry args={[scale * 0.34, 8, 6]} />
+        <meshBasicNodeMaterial color={fill} {...materialProps} />
+      </mesh>
+      <mesh
+        frustumCulled={false}
+        position={[0, scale * 0.15, 0]}
+        renderOrder={renderOrder}
+      >
+        <cylinderGeometry args={[scale * 0.06, scale * 0.08, scale * 0.3, 5]} />
+        <meshBasicNodeMaterial color={dark} {...materialProps} />
+      </mesh>
+    </group>
+  );
+}
+
+function StructureModelLayer({
+  layer,
+  project,
+  projectSpace,
+  renderOrder,
+  selectFeatureInLayer,
+  terrain,
+  terrainGenerated,
+  terrainSpace,
+  viewScaleMode
+}: {
+  layer: PlanningLayer;
+  project: ProjectMetadata;
+  projectSpace: ProjectSpace;
+  renderOrder: number;
+  selectFeatureInLayer: (layerId: string, featureId: string) => void;
+  terrain: TerrainModel;
+  terrainGenerated: boolean;
+  terrainSpace: TerrainSpace;
+  viewScaleMode: "fit" | "1:1";
+}) {
+  const features = getRenderableFeatures(layer, viewScaleMode).filter(
+    (feature) => feature.geometryType === "point"
+  );
+  const setHoveredFeature = useEditorStore((state) => state.setHoveredFeature);
+  const blockSize = clamp(terrainSpace.displayScale * 140, 0.46, 1.25);
+  const blockHeight = blockSize * 1.45;
+  const lift = RASTER_DRAPE_BASE_LIFT + blockSize * 0.08;
+
+  if (!features.length) {
+    return null;
+  }
+
+  return (
+    <group renderOrder={renderOrder + 16}>
+      {features.map((feature) => {
+        const coordinate = feature.coordinates[0];
+        if (!coordinate) {
+          return null;
+        }
+
+        const base = projectCoordinateToScene(
+          coordinate,
+          project,
+          projectSpace,
+          terrain,
+          terrainSpace,
+          terrainGenerated,
+          lift
+        );
+        const color = getStructureFeatureColor(feature);
+        const position: Vec3 = [base[0], base[1] + blockHeight / 2, base[2]];
+        const handleClick = (event: { stopPropagation: () => void }) => {
+          event.stopPropagation();
+          selectFeatureInLayer(layer.id, feature.id);
+        };
+        const handlePointerOut = (event: { stopPropagation: () => void }) => {
+          event.stopPropagation();
+          document.body.style.cursor = "";
+          setHoveredFeature(null, null);
+        };
+        const handlePointerOver = (event: { stopPropagation: () => void }) => {
+          event.stopPropagation();
+          document.body.style.cursor = "pointer";
+          setHoveredFeature(layer.id, feature.id);
+        };
+
+        return (
+          <mesh
+            castShadow
+            frustumCulled={false}
+            key={feature.id}
+            onClick={handleClick}
+            onPointerOut={handlePointerOut}
+            onPointerOver={handlePointerOver}
+            position={position}
+            renderOrder={renderOrder + 16}
+          >
+            <boxGeometry args={[blockSize, blockHeight, blockSize]} />
+            <meshBasicNodeMaterial
+              color={new Color(color)}
+              depthTest
+              depthWrite
+            />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+function BuildingModelLayer({
+  layer,
+  project,
+  projectSpace,
+  renderOrder,
+  selectFeatureInLayer,
+  terrain,
+  terrainGenerated,
+  terrainSpace,
+  viewScaleMode
+}: {
+  layer: PlanningLayer;
+  project: ProjectMetadata;
+  projectSpace: ProjectSpace;
+  renderOrder: number;
+  selectFeatureInLayer: (layerId: string, featureId: string) => void;
+  terrain: TerrainModel;
+  terrainGenerated: boolean;
+  terrainSpace: TerrainSpace;
+  viewScaleMode: "fit" | "1:1";
+}) {
+  const features = getRenderableFeatures(layer, viewScaleMode).filter(
+    (feature) => feature.geometryType === "polygon"
+  );
+  const setHoveredFeature = useEditorStore((state) => state.setHoveredFeature);
+
+  if (!features.length) {
+    return null;
+  }
+
+  return (
+    <group renderOrder={renderOrder + 14}>
+      {features.map((feature) => (
+        <BuildingMesh
+          feature={feature}
+          key={feature.id}
+          layer={layer}
+          project={project}
+          projectSpace={projectSpace}
+          renderOrder={renderOrder + 14}
+          selectFeatureInLayer={selectFeatureInLayer}
+          setHoveredFeature={setHoveredFeature}
+          terrain={terrain}
+          terrainGenerated={terrainGenerated}
+          terrainSpace={terrainSpace}
+        />
+      ))}
+    </group>
+  );
+}
+
+function BuildingMesh({
+  feature,
+  layer,
+  project,
+  projectSpace,
+  renderOrder,
+  selectFeatureInLayer,
+  setHoveredFeature,
+  terrain,
+  terrainGenerated,
+  terrainSpace
+}: {
+  feature: NonNullable<PlanningLayer["features"]>[number];
+  layer: PlanningLayer;
+  project: ProjectMetadata;
+  projectSpace: ProjectSpace;
+  renderOrder: number;
+  selectFeatureInLayer: (layerId: string, featureId: string) => void;
+  setHoveredFeature: (layerId: string | null, featureId: string | null) => void;
+  terrain: TerrainModel;
+  terrainGenerated: boolean;
+  terrainSpace: TerrainSpace;
+}) {
+  const heightMeters = getBuildingHeightMeters(feature);
+  const height = heightMeters * terrainSpace.displayScale * terrainSpace.verticalScale;
+  const color = getBuildingFeatureColor(feature);
+  const geometry = useMemo(
+    () =>
+      buildBuildingExtrusionGeometry(
+        feature,
+        project,
+        projectSpace,
+        terrain,
+        terrainSpace,
+        terrainGenerated,
+        height,
+        RASTER_DRAPE_BASE_LIFT
+      ),
+    [feature, project, projectSpace, terrain, terrainSpace, terrainGenerated, height]
+  );
+
+  if (!geometry) {
+    return null;
+  }
+
+  const handleClick = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
+    selectFeatureInLayer(layer.id, feature.id);
+  };
+  const handlePointerOut = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
+    document.body.style.cursor = "";
+    setHoveredFeature(null, null);
+  };
+  const handlePointerOver = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
+    document.body.style.cursor = "pointer";
+    setHoveredFeature(layer.id, feature.id);
+  };
+
+  return (
+    <mesh
+      castShadow
+      frustumCulled={false}
+      geometry={geometry}
+      onClick={handleClick}
+      onPointerOut={handlePointerOut}
+      onPointerOver={handlePointerOver}
+      renderOrder={renderOrder}
+    >
+      <meshBasicNodeMaterial
+        color={new Color(color)}
+        depthTest
+        depthWrite
+        side={DoubleSide}
       />
     </mesh>
   );
@@ -1395,16 +2062,15 @@ function FoundationalLayerContent({
   const renderOrder = getLayerRenderOrder(layers, layer.id);
   const project = useEditorStore((state) => state.project);
   const selectFeatureInLayer = useEditorStore((state) => state.selectFeatureInLayer);
-  const projectSpace = useMemo(
-    () => getProjectSpace(project, viewScaleMode === "1:1" ? 1 : undefined),
-    [project, viewScaleMode]
-  );
+  const projectSpace = useMemo(() => getProjectSpace(project), [project]);
   const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
   const stackLift = getLayerStackLift(layers, layer.id);
   const lift =
-    layer.geometryType === "line" ||
-    layer.geometryType === "mixed" ||
-    layer.geometryType === "polygon"
+    layer.id === "safe-data-boundaries"
+      ? BOUNDARY_LINE_LIFT
+      : layer.geometryType === "line" ||
+        layer.geometryType === "mixed" ||
+        layer.geometryType === "polygon"
       ? getVectorLayerLift(layers, layer.id)
       : stackLift;
   const clippingPlanes = useMemo(
@@ -1416,6 +2082,21 @@ function FoundationalLayerContent({
   );
 
   if (layer.geometryType === "raster") {
+    if (layer.id === "safe-data-woodland" && layer.rasterGeoreference) {
+      return (
+        <WoodlandModelLayer
+          layer={layer}
+          project={project}
+          projectSpace={projectSpace}
+          renderOrder={renderOrder}
+          terrain={terrain}
+          terrainGenerated={terrainGenerated}
+          terrainSpace={terrainSpace}
+          viewScaleMode={viewScaleMode}
+        />
+      );
+    }
+
     if (shouldDrapeRasterLayer(layer, terrainGenerated)) {
       return (
         <DrapedRasterMesh
@@ -1426,6 +2107,7 @@ function FoundationalLayerContent({
           stackLift={stackLift}
           terrain={terrain}
           terrainSpace={terrainSpace}
+          visible={viewScaleMode !== "1:1"}
         />
       );
     }
@@ -1466,9 +2148,41 @@ function FoundationalLayerContent({
     return null;
   }
 
+  if (layer.id === "safe-data-structures") {
+    return (
+      <StructureModelLayer
+        layer={layer}
+        project={project}
+        projectSpace={projectSpace}
+        renderOrder={renderOrder}
+        selectFeatureInLayer={selectFeatureInLayer}
+        terrain={terrain}
+        terrainGenerated={terrainGenerated}
+        terrainSpace={terrainSpace}
+        viewScaleMode={viewScaleMode}
+      />
+    );
+  }
+
+  if (layer.id === "safe-data-buildings") {
+    return (
+      <BuildingModelLayer
+        layer={layer}
+        project={project}
+        projectSpace={projectSpace}
+        renderOrder={renderOrder}
+        selectFeatureInLayer={selectFeatureInLayer}
+        terrain={terrain}
+        terrainGenerated={terrainGenerated}
+        terrainSpace={terrainSpace}
+        viewScaleMode={viewScaleMode}
+      />
+    );
+  }
+
   return (
     <group renderOrder={renderOrder}>
-      {layer.features.map((feature) => (
+      {getRenderableFeatures(layer, viewScaleMode).map((feature) => (
         <FeatureOverlay
           clippingPlanes={clippingPlanes}
           feature={feature}
@@ -1482,6 +2196,7 @@ function FoundationalLayerContent({
           terrain={terrain}
           terrainGenerated={terrainGenerated}
           terrainSpace={terrainSpace}
+          renderPolygonFill={viewScaleMode !== "1:1" || layer.id === "safe-data-boundaries"}
         />
       ))}
     </group>
@@ -1499,7 +2214,8 @@ function FeatureOverlay({
   selectFeatureInLayer,
   terrain,
   terrainGenerated,
-  terrainSpace
+  terrainSpace,
+  renderPolygonFill
 }: {
   clippingPlanes?: THREE.Plane[];
   feature: NonNullable<PlanningLayer["features"]>[number];
@@ -1512,6 +2228,7 @@ function FeatureOverlay({
   terrain: TerrainModel;
   terrainGenerated: boolean;
   terrainSpace: TerrainSpace;
+  renderPolygonFill: boolean;
 }) {
   const geometry = useMemo(
     () =>
@@ -1527,9 +2244,21 @@ function FeatureOverlay({
     [feature, project, projectSpace, terrain, terrainSpace, terrainGenerated, lift]
   );
   const polygonFillGeometry = useMemo(
-    () =>
-      feature.geometryType === "polygon"
-        ? buildPolygonFillGeometry(
+    () => {
+      if (feature.geometryType !== "polygon" || !renderPolygonFill) {
+        return null;
+      }
+
+      return layer.id === "safe-data-boundaries"
+        ? buildDrapedPolygonFillGeometry(
+            feature,
+            project,
+            terrain,
+            terrainSpace,
+            terrainGenerated,
+            lift - LAYER_STACK_LIFT_STEP * 0.18
+          )
+        : buildPolygonFillGeometry(
             feature,
             project,
             projectSpace,
@@ -1537,9 +2266,19 @@ function FeatureOverlay({
             terrainSpace,
             terrainGenerated,
             lift - LAYER_STACK_LIFT_STEP * 0.18
-          )
-        : null,
-    [feature, project, projectSpace, terrain, terrainSpace, terrainGenerated, lift]
+          );
+    },
+    [
+      feature,
+      layer.id,
+      project,
+      projectSpace,
+      terrain,
+      terrainSpace,
+      terrainGenerated,
+      lift,
+      renderPolygonFill
+    ]
   );
   const setHoveredFeature = useEditorStore((state) => state.setHoveredFeature);
 
@@ -1563,6 +2302,9 @@ function FeatureOverlay({
   };
   const fillColor = getFeatureFillColor(layer, feature);
   const strokeColor = getFeatureStrokeColor(layer, feature);
+  const fillOpacity = getFeatureFillOpacity(layer);
+  const depthAwareOverlay = layer.id === "safe-data-boundaries";
+  const terrainDrapedFill = layer.id === "safe-data-boundaries";
 
   return (
     <group
@@ -1577,11 +2319,11 @@ function FeatureOverlay({
             clippingPlanes={clippingPlanes}
             clipIntersection={false}
             color={new Color(fillColor)}
-            depthTest={false}
+            depthTest={terrainDrapedFill ? false : depthAwareOverlay}
             depthWrite={false}
-            opacity={Math.min(0.72, Math.max(0.18, layer.opacity * 0.62))}
-            side={DoubleSide}
-            transparent
+            opacity={fillOpacity}
+            side={terrainDrapedFill ? FrontSide : DoubleSide}
+            transparent={fillOpacity < FULL_LAYER_OPACITY}
           />
         </mesh>
       ) : null}
@@ -1590,7 +2332,7 @@ function FeatureOverlay({
           clippingPlanes={clippingPlanes}
           clipIntersection={false}
           color={strokeColor}
-          depthTest={false}
+          depthTest={depthAwareOverlay}
           depthWrite={false}
           linewidth={layer.style?.strokeWidth ?? 2}
           opacity={Math.min(1, Math.max(0.24, layer.opacity))}
@@ -1601,21 +2343,13 @@ function FeatureOverlay({
   );
 }
 
-function LayeredSceneContent() {
+const LayeredSceneContent = memo(function LayeredSceneContent() {
   const layers = useEditorStore((state) => state.layers);
   const terrain = useEditorStore((state) => state.terrain);
   const terrainGenerated = useEditorStore((state) => state.terrainGenerated);
-  const viewScaleMode = useEditorStore((state) => state.viewScaleMode);
   const terrainSpace = useMemo(
-    () =>
-      getTerrainSpace(
-        terrain,
-        viewScaleMode === "1:1" ? 1 : undefined,
-        viewScaleMode === "1:1"
-          ? ONE_TO_ONE_VERTICAL_EXAGGERATION
-          : FIT_VERTICAL_EXAGGERATION
-      ),
-    [terrain, viewScaleMode]
+    () => getTerrainSpace(terrain, undefined, FIT_VERTICAL_EXAGGERATION),
+    [terrain]
   );
   const terrainLayerIndex = layers.findIndex((layer) => layer.id === "terrain-mesh");
   const orthophotoLayerIndex = layers.findIndex(
@@ -1641,54 +2375,66 @@ function LayeredSceneContent() {
   return (
     <>
       {!terrainGenerated ? <GroundPlane baseY={-0.12} /> : null}
-      {compositeLayers.map(({ layer }) => {
-        if (layer.id === "orthophoto-base") {
-          return (
-            <OrthophotoLayerContent
-              forceOverlay={orthophotoAboveTerrain}
-              key={layer.id}
-              renderOrder={getLayerRenderOrder(layers, layer.id)}
-            />
-          );
-        }
+      <group>
+        {compositeLayers.map(({ layer }) => {
+          if (layer.id === "orthophoto-base") {
+            return (
+              <OrthophotoLayerContent
+                forceOverlay={orthophotoAboveTerrain}
+                key={layer.id}
+                renderOrder={getLayerRenderOrder(layers, layer.id)}
+              />
+            );
+          }
 
-        if (layer.id === "terrain-mesh" && terrainGenerated) {
-          return (
-            <TerrainLayerContent
-              hideTopSurface={hideTerrainSurface}
-              key={layer.id}
-              space={terrainSpace}
-              terrain={terrain}
-            />
-          );
-        }
+          if (layer.id === "terrain-mesh" && terrainGenerated) {
+            return (
+              <TerrainLayerContent
+                hideTopSurface={hideTerrainSurface}
+                key={layer.id}
+                showContours
+                space={terrainSpace}
+                terrain={terrain}
+              />
+            );
+          }
 
-        if (
-          layer.kind === "foundational-map" ||
-          layer.kind === "lca" ||
-          (layer.kind === "orthophoto" && layer.id !== "orthophoto-base")
-        ) {
-          return (
-            <FoundationalLayerContent
-              key={layer.id}
-              layer={layer}
-              layers={layers}
-              terrain={terrain}
-              terrainGenerated={terrainGenerated}
-              terrainSpace={terrainSpace}
-              viewScaleMode={viewScaleMode}
-            />
-          );
-        }
+          if (
+            layer.kind === "foundational-map" ||
+            layer.kind === "lca" ||
+            (layer.kind === "orthophoto" && layer.id !== "orthophoto-base")
+          ) {
+            return (
+              <FoundationalLayerContent
+                key={layer.id}
+                layer={layer}
+                layers={layers}
+                terrain={terrain}
+                terrainGenerated={terrainGenerated}
+                terrainSpace={terrainSpace}
+                viewScaleMode="fit"
+              />
+            );
+          }
 
-        return null;
-      })}
+          return null;
+        })}
+      </group>
     </>
   );
-}
+});
 
 function getLayer(layers: PlanningLayer[], id: string) {
   return layers.find((layer) => layer.id === id);
+}
+
+function getRenderableFeatures(layer: PlanningLayer, viewScaleMode: "fit" | "1:1") {
+  const features = layer.features ?? [];
+  if (viewScaleMode !== "1:1" || features.length <= MAX_ONE_TO_ONE_VECTOR_FEATURES) {
+    return features;
+  }
+
+  return features.slice(0, MAX_ONE_TO_ONE_VECTOR_FEATURES);
 }
 
 function buildVectorFeatureGeometry(
@@ -1811,6 +2557,173 @@ function buildPolygonFillGeometry(
   return geometry;
 }
 
+function buildDrapedPolygonFillGeometry(
+  feature: NonNullable<PlanningLayer["features"]>[number],
+  project: ProjectMetadata,
+  terrain: TerrainModel,
+  terrainSpace: TerrainSpace,
+  terrainGenerated: boolean,
+  lift: number
+) {
+  const ring = removeClosingCoordinate(feature.coordinates);
+  if (ring.length < 3) {
+    return null;
+  }
+
+  const bounds = getCoordinateBounds(ring);
+  const grid = getRenderGridSize(terrain);
+  const last = grid - 1;
+  const minGx = clamp(Math.floor((bounds.minX / project.realWorldExtentMeters.width) * last), 0, last - 1);
+  const maxGx = clamp(Math.ceil((bounds.maxX / project.realWorldExtentMeters.width) * last), 1, last);
+  const minGy = clamp(Math.floor((bounds.minY / project.realWorldExtentMeters.depth) * last), 0, last - 1);
+  const maxGy = clamp(Math.ceil((bounds.maxY / project.realWorldExtentMeters.depth) * last), 1, last);
+  const positions: number[] = [];
+
+  const pointAtGrid = (gx: number, gy: number): Coordinate => [
+    (gx / last) * project.realWorldExtentMeters.width,
+    (gy / last) * project.realWorldExtentMeters.depth
+  ];
+  const scenePoint = (coordinate: Coordinate): Vec3 => {
+    const u = clamp(coordinate[0] / project.realWorldExtentMeters.width, 0, 1);
+    const v = clamp(coordinate[1] / project.realWorldExtentMeters.depth, 0, 1);
+    const x = (u - 0.5) * terrainSpace.sizeX;
+    const z = (v - 0.5) * terrainSpace.sizeZ;
+    const y = terrainGenerated ? sampleHeightAt(terrain, terrainSpace, u, v) + lift : lift;
+    return [x, y, z];
+  };
+  const pushTriangle = (a: Coordinate, b: Coordinate, c: Coordinate) => {
+    positions.push(...scenePoint(a), ...scenePoint(b), ...scenePoint(c));
+  };
+
+  for (let gy = minGy; gy < maxGy; gy += 1) {
+    for (let gx = minGx; gx < maxGx; gx += 1) {
+      const northWest = pointAtGrid(gx, gy);
+      const northEast = pointAtGrid(gx + 1, gy);
+      const southEast = pointAtGrid(gx + 1, gy + 1);
+      const southWest = pointAtGrid(gx, gy + 1);
+      const center: Coordinate = [
+        (northWest[0] + southEast[0]) / 2,
+        (northWest[1] + southEast[1]) / 2
+      ];
+
+      if (!isCoordinateInsideRing(center, ring)) {
+        continue;
+      }
+
+      pushTriangle(northWest, southEast, northEast);
+      pushTriangle(northWest, southWest, southEast);
+    }
+  }
+
+  if (positions.length === 0) {
+    return buildPolygonFillGeometry(
+      feature,
+      project,
+      getProjectSpace(project),
+      terrain,
+      terrainSpace,
+      terrainGenerated,
+      lift
+    );
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function buildBuildingExtrusionGeometry(
+  feature: NonNullable<PlanningLayer["features"]>[number],
+  project: ProjectMetadata,
+  projectSpace: ProjectSpace,
+  terrain: TerrainModel,
+  terrainSpace: TerrainSpace,
+  terrainGenerated: boolean,
+  height: number,
+  lift: number
+) {
+  const coordinates = removeClosingCoordinate(feature.coordinates);
+  if (coordinates.length < 3) {
+    return null;
+  }
+
+  const basePoints = coordinates.map((coordinate) =>
+    projectCoordinateToScene(
+      coordinate,
+      project,
+      projectSpace,
+      terrain,
+      terrainSpace,
+      terrainGenerated,
+      lift
+    )
+  );
+  const topPoints = basePoints.map((point) => [point[0], point[1] + height, point[2]] as Vec3);
+  const shapePoints = basePoints.map((point) => new Vector2(point[0], point[2]));
+  const triangles = ShapeUtils.triangulateShape(shapePoints, []);
+  const positions: number[] = [];
+
+  for (const triangle of triangles) {
+    for (const pointIndex of triangle) {
+      positions.push(...topPoints[pointIndex]);
+    }
+  }
+
+  for (let index = 0; index < basePoints.length; index += 1) {
+    const nextIndex = (index + 1) % basePoints.length;
+    const baseA = basePoints[index];
+    const baseB = basePoints[nextIndex];
+    const topA = topPoints[index];
+    const topB = topPoints[nextIndex];
+    positions.push(...baseA, ...topB, ...baseB);
+    positions.push(...baseA, ...topA, ...topB);
+  }
+
+  if (positions.length === 0) {
+    return null;
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function getCoordinateBounds(coordinates: Coordinate[]) {
+  return coordinates.reduce(
+    (bounds, coordinate) => ({
+      minX: Math.min(bounds.minX, coordinate[0]),
+      minY: Math.min(bounds.minY, coordinate[1]),
+      maxX: Math.max(bounds.maxX, coordinate[0]),
+      maxY: Math.max(bounds.maxY, coordinate[1])
+    }),
+    {
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY
+    }
+  );
+}
+
+function isCoordinateInsideRing(point: Coordinate, ring: Coordinate[]) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const xi = ring[i][0];
+    const yi = ring[i][1];
+    const xj = ring[j][0];
+    const yj = ring[j][1];
+    const intersects =
+      yi > point[1] !== yj > point[1] &&
+      point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi || 1e-9) + xi;
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 function closeRing(coordinates: Coordinate[]) {
   const first = coordinates[0];
   const last = coordinates[coordinates.length - 1];
@@ -1838,6 +2751,9 @@ function getFeatureFillColor(
   if (layer.id === "safe-data-soil") {
     return getSoilFeatureColor(feature);
   }
+  if (layer.id === "safe-data-boundaries") {
+    return getBoundaryFeatureColor(feature);
+  }
 
   return layer.style?.fill ?? "#4aa3cf";
 }
@@ -1849,8 +2765,90 @@ function getFeatureStrokeColor(
   if (layer.id === "safe-data-soil") {
     return darkenHex(getSoilFeatureColor(feature), 0.28);
   }
+  if (layer.id === "safe-data-boundaries") {
+    return darkenHex(getBoundaryFeatureColor(feature), 0.24);
+  }
 
   return layer.style?.stroke ?? "#2f6f4e";
+}
+
+function getFeatureFillOpacity(layer: PlanningLayer) {
+  if (layer.id === "safe-data-boundaries") {
+    return layer.opacity;
+  }
+
+  return Math.min(0.72, Math.max(0.18, layer.opacity * 0.62));
+}
+
+function getBoundaryFeatureColor(
+  feature: NonNullable<PlanningLayer["features"]>[number]
+) {
+  const layerKind = String(feature.attributes?.layerKind ?? "");
+  return BOUNDARY_KIND_COLORS[layerKind] ?? "#7a6fb0";
+}
+
+function getStructureFeatureColor(
+  feature: NonNullable<PlanningLayer["features"]>[number]
+) {
+  const layerKind = String(feature.attributes?.layerKind ?? "");
+  return STRUCTURE_KIND_COLORS[layerKind] ?? "#8b5c4a";
+}
+
+function getBuildingFeatureColor(
+  feature: NonNullable<PlanningLayer["features"]>[number]
+) {
+  const buildingType = String(feature.attributes?.building ?? "yes");
+  return BUILDING_TYPE_COLORS[buildingType] ?? "#8f9dad";
+}
+
+function getBuildingHeightMeters(
+  feature: NonNullable<PlanningLayer["features"]>[number]
+) {
+  const explicitHeight = parseHeightMeters(feature.attributes?.height);
+  if (explicitHeight) {
+    return explicitHeight;
+  }
+
+  const levels = Number.parseFloat(String(feature.attributes?.["building:levels"] ?? ""));
+  if (Number.isFinite(levels) && levels > 0) {
+    return clamp(levels * 3.2, 3.2, 80);
+  }
+
+  const buildingType = String(feature.attributes?.building ?? "");
+  if (buildingType === "school" || buildingType === "public" || buildingType === "civic") {
+    return 10;
+  }
+  if (buildingType === "commercial" || buildingType === "retail") {
+    return 8;
+  }
+  if (buildingType === "industrial" || buildingType === "warehouse") {
+    return 9;
+  }
+  if (buildingType === "cabin" || buildingType === "house" || buildingType === "residential") {
+    return 5.5;
+  }
+
+  return 6;
+}
+
+function parseHeightMeters(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) {
+    return null;
+  }
+
+  const numeric = Number.parseFloat(raw.replace(",", "."));
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null;
+  }
+
+  return raw.includes("ft") || raw.includes("'")
+    ? clamp(numeric * 0.3048, 2.5, 120)
+    : clamp(numeric, 2.5, 120);
 }
 
 function getSoilFeatureColor(feature: NonNullable<PlanningLayer["features"]>[number]) {
@@ -2087,23 +3085,22 @@ export function TerrainScene() {
     () =>
       getTerrainSpace(
         terrain,
-        viewScaleMode === "1:1" ? 1 : undefined,
-        viewScaleMode === "1:1"
-          ? ONE_TO_ONE_VERTICAL_EXAGGERATION
-          : FIT_VERTICAL_EXAGGERATION
+        getTerrainScaleOverride(terrain, viewScaleMode),
+        FIT_VERTICAL_EXAGGERATION
       ),
     [terrain, viewScaleMode]
   );
 
   const { controls, perspectiveStart, target, topStart } = useMemo(() => {
     const span = Math.max(space.sizeX, space.sizeZ, TARGET_SCENE_SPAN);
-    const surfaceTop =
-      terrain.maxElevation * space.displayScale * space.verticalScale;
+    const surfaceTop = elevationToSceneHeight(terrain.maxElevation, space);
     const height = surfaceTop - space.baseY;
     const targetY = space.baseY + height * 0.55;
-    const radius = Math.hypot(span, height);
-    const dist = radius * 1.35;
-    const topDist = radius * 2.4;
+    const radius = Math.min(Math.hypot(span, height), MAX_CAMERA_RADIUS);
+    const detailZoom = viewScaleMode === "1:1" ? 0.45 : 1;
+    const topZoomMultiplier = viewScaleMode === "1:1" ? 2.65 : 1;
+    const dist = radius * 1.35 * detailZoom;
+    const topDist = radius * 2.4 * detailZoom;
     return {
       target: [0, targetY, 0] as [number, number, number],
       perspectiveStart: [dist * 0.8, targetY + dist * 0.66, dist * 0.8] as [
@@ -2119,17 +3116,16 @@ export function TerrainScene() {
         maxDistance: radius * 8,
         topMaxZoom: 60,
         topMinZoom: Math.max(0.02, TARGET_SCENE_SPAN / (span * 5)),
-        topZoom: Math.max(0.05, TARGET_SCENE_SPAN / (span * 1.35))
+        topZoom: Math.max(
+          0.05,
+          (TARGET_SCENE_SPAN / (span * 1.35)) * topZoomMultiplier
+        )
       }
     };
-  }, [space, terrain.maxElevation]);
+  }, [space, terrain.maxElevation, viewScaleMode]);
   const isTopView = activeMode === "top-view";
   const cameraPosition = isTopView ? topStart : perspectiveStart;
-  const cameraKey = [
-    activeMode,
-    viewScaleMode,
-    target.map((value) => value.toFixed(3)).join(":")
-  ].join("-");
+  const cameraKey = activeMode;
 
   return (
     <Canvas

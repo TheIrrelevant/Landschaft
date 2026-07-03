@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Safe location search and dataset selection panel for provider-backed imports.
- * last-updated: 2026-07-01
+ * last-updated: 2026-07-03
  * last-model: codex-gpt-5
- * last-change: show expanded safe dataset labels for soil, land-cover, and flood-hazard
+ * last-change: add structures, boundaries, and woodland dataset labels
  * ---end-metadata---
  */
 import {
@@ -26,7 +26,10 @@ const datasetLabels = {
   transportation: "Transportation",
   soil: "USDA soils",
   "land-cover": "NLCD land cover",
-  "flood-hazard": "FEMA flood hazard"
+  structures: "Structures",
+  buildings: "Buildings",
+  boundaries: "Boundaries",
+  woodland: "Woodland"
 } as const;
 
 export function TerrainSetupPanel() {

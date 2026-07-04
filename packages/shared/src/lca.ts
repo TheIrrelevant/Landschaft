@@ -4,7 +4,7 @@
  * description: Landscape Character Assessment draft generation and layer mapping for Landschaft.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: add LCA code anatomy and evidence citation metadata
+ * last-change: link LCA metadata to intersecting evidence features
  * ---end-metadata---
  */
 import type {
@@ -28,6 +28,7 @@ export interface LcaDraftAnalysisResult {
   model: string;
   promptVersion: string;
   inputLayerIds: string[];
+  evidenceFeatures?: MapEvidenceFeature[];
 }
 
 export interface DeepSeekLcaPrompt {
@@ -44,6 +45,7 @@ export interface LcaCodeAnatomySegment {
   position: number;
   theme: string;
   sourceLayerId: string;
+  sourceFeatureId?: string;
   sourceAttribute: string;
   sourceValue: string;
   meaning: string;
@@ -111,7 +113,8 @@ export function generateMockLcaDraft(
     areas,
     model: "landschaft-mock-lca",
     promptVersion: LCA_PROMPT_VERSION,
-    inputLayerIds: request.evidence.selectedLayerIds
+    inputLayerIds: request.evidence.selectedLayerIds,
+    evidenceFeatures: request.evidence.features
   };
 }
 
@@ -199,14 +202,18 @@ export function parseDeepSeekLcaDraftResponse(
     model: getStringValue(payload, "model") ?? LCA_DEEPSEEK_MODEL,
     promptVersion:
       getStringValue(payload, "promptVersion") ?? LCA_DEEPSEEK_PROMPT_VERSION,
-    inputLayerIds: request.evidence.selectedLayerIds
+    inputLayerIds: request.evidence.selectedLayerIds,
+    evidenceFeatures: request.evidence.features
   };
 }
 
 export function createLcaLayerFromDraft(
   project: ProjectMetadata,
   areas: CodedArea[],
-  analysis: Pick<LcaDraftAnalysisResult, "model" | "promptVersion" | "inputLayerIds">
+  analysis: Pick<
+    LcaDraftAnalysisResult,
+    "model" | "promptVersion" | "inputLayerIds" | "evidenceFeatures"
+  >
 ): PlanningLayer {
   const features = areas.map((area) => codedAreaToVectorFeature(area, analysis));
 
@@ -339,10 +346,25 @@ function defaultExtentCharacterAreas(
 
 function codedAreaToVectorFeature(
   area: CodedArea,
-  analysis: Pick<LcaDraftAnalysisResult, "model" | "promptVersion" | "inputLayerIds">
+  analysis: Pick<
+    LcaDraftAnalysisResult,
+    "model" | "promptVersion" | "inputLayerIds" | "evidenceFeatures"
+  >
 ): VectorFeature {
-  const codeAnatomy = buildCodeAnatomy(area, analysis.inputLayerIds);
-  const evidenceCitations = buildEvidenceCitations(area, analysis.inputLayerIds);
+  const relevantEvidence = findRelevantEvidenceFeatures(
+    area,
+    analysis.evidenceFeatures ?? []
+  );
+  const codeAnatomy = buildCodeAnatomy(
+    area,
+    analysis.inputLayerIds,
+    relevantEvidence
+  );
+  const evidenceCitations = buildEvidenceCitations(
+    area,
+    analysis.inputLayerIds,
+    relevantEvidence
+  );
 
   return {
     id: area.id,
@@ -381,25 +403,46 @@ function validateCodedArea(area: CodedArea): CodedArea {
 
 function buildCodeAnatomy(
   area: CodedArea,
-  inputLayerIds: string[]
+  inputLayerIds: string[],
+  evidenceFeatures: MapEvidenceFeature[]
 ): LcaCodeAnatomySegment[] {
   const segments = splitCharacterCode(area.code);
   const sourceLayerIds = inputLayerIds.length ? inputLayerIds : ["derived-lca"];
 
   return segments.map((segment, index) => {
     const theme = LCA_CODE_THEMES[index % LCA_CODE_THEMES.length];
-    const sourceLayerId = sourceLayerIds[index % sourceLayerIds.length];
+    const evidenceFeature = evidenceFeatures[index % evidenceFeatures.length];
+    const sourceLayerId =
+      evidenceFeature?.layerId ?? sourceLayerIds[index % sourceLayerIds.length];
+    const sourceAttribute = findThemeAttribute(
+      evidenceFeature?.attributes ?? {},
+      theme
+    );
+    const fallbackAttribute = evidenceFeature
+      ? Object.keys(evidenceFeature.attributes)[0]
+      : undefined;
+    const selectedAttribute = sourceAttribute ?? fallbackAttribute;
+    const sourceValue = sourceAttribute
+      ? evidenceFeature?.attributes[sourceAttribute] ?? segment
+      : selectedAttribute
+        ? evidenceFeature?.attributes[selectedAttribute] ?? segment
+      : segment;
 
     return {
       segment,
       position: index + 1,
       theme,
       sourceLayerId,
-      sourceAttribute: theme,
-      sourceValue: segment,
-      meaning: `${segment} is a draft ${formatTheme(theme)} code segment for ${area.label}.`,
+      sourceFeatureId: evidenceFeature?.id,
+      sourceAttribute: selectedAttribute ?? theme,
+      sourceValue,
+      meaning: evidenceFeature
+        ? `${segment} is a draft ${formatTheme(theme)} code segment for ${area.label}, linked to ${evidenceFeature.label} from ${evidenceFeature.layerName}.`
+        : `${segment} is a draft ${formatTheme(theme)} code segment for ${area.label}.`,
       classificationRule:
-        "Draft MVP mapping assembled from selected LCA evidence and pending knowledge-bank review.",
+        evidenceFeature
+          ? "Draft MVP mapping selected from source features whose project-metre bounds intersect the LCA area."
+          : "Draft MVP mapping assembled from selected LCA evidence and pending knowledge-bank review.",
       confidence: area.confidence,
       version: LCA_KNOWLEDGE_BANK_VERSION
     };
@@ -408,9 +451,21 @@ function buildCodeAnatomy(
 
 function buildEvidenceCitations(
   area: CodedArea,
-  inputLayerIds: string[]
+  inputLayerIds: string[],
+  evidenceFeatures: MapEvidenceFeature[]
 ): LcaEvidenceCitation[] {
   const sourceLayerIds = inputLayerIds.length ? inputLayerIds : ["derived-lca"];
+
+  if (evidenceFeatures.length > 0) {
+    return evidenceFeatures.slice(0, 8).map((feature, index) => ({
+      id: `${area.id}-evidence-${index + 1}`,
+      sourceLayerId: feature.layerId,
+      sourceFeatureId: feature.id,
+      label: `${feature.layerName}: ${feature.label}`,
+      excerpt: buildEvidenceExcerpt(feature, area),
+      confidence: area.confidence
+    }));
+  }
 
   return sourceLayerIds.map((sourceLayerId, index) => ({
     id: `${area.id}-evidence-${index + 1}`,
@@ -419,6 +474,71 @@ function buildEvidenceCitations(
     excerpt: area.meaning,
     confidence: area.confidence
   }));
+}
+
+function findRelevantEvidenceFeatures(
+  area: CodedArea,
+  evidenceFeatures: MapEvidenceFeature[]
+) {
+  const areaBounds = getBounds(area.ring);
+  return evidenceFeatures.filter((feature) =>
+    boundsIntersect(areaBounds, getBounds(feature.coordinates))
+  );
+}
+
+function buildEvidenceExcerpt(feature: MapEvidenceFeature, area: CodedArea) {
+  const attributes = Object.entries(feature.attributes)
+    .slice(0, 4)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("; ");
+
+  return attributes
+    ? `${feature.label} intersects ${area.label}. Evidence: ${attributes}.`
+    : `${feature.label} intersects ${area.label} in project-metre space.`;
+}
+
+function findThemeAttribute(
+  attributes: Record<string, string>,
+  theme: (typeof LCA_CODE_THEMES)[number]
+) {
+  const candidates: Record<(typeof LCA_CODE_THEMES)[number], string[]> = {
+    topography: ["elevation", "height", "contourelevation", "slope"],
+    slope: ["slope", "gradient", "aspect"],
+    geology: ["geology", "parentMaterial", "lithology", "bedrock"],
+    soil: ["soil", "Soil", "musym", "nationalmusym", "mukey"],
+    vegetation: ["vegetation", "landCover", "land-cover", "cover", "woodland"],
+    "land-use": ["landUse", "LandUse", "use", "suitability", "building"]
+  };
+
+  return candidates[theme].find((key) => attributes[key]);
+}
+
+type Bounds = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+};
+
+function getBounds(coordinates: Coordinate[]): Bounds {
+  return coordinates.reduce(
+    (bounds, coordinate) => ({
+      minX: Math.min(bounds.minX, coordinate[0]),
+      minY: Math.min(bounds.minY, coordinate[1]),
+      maxX: Math.max(bounds.maxX, coordinate[0]),
+      maxY: Math.max(bounds.maxY, coordinate[1])
+    }),
+    {
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY
+    }
+  );
+}
+
+function boundsIntersect(a: Bounds, b: Bounds) {
+  return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
 }
 
 function splitCharacterCode(code: string) {

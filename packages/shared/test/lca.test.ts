@@ -4,7 +4,7 @@
  * description: Tests for Landschaft LCA prompt and DeepSeek response parsing.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: cover LCA code anatomy and citation metadata
+ * last-change: cover source-linked LCA code anatomy and citations
  * ---end-metadata---
  */
 import assert from "node:assert/strict";
@@ -122,7 +122,8 @@ describe("createLcaLayerFromDraft", () => {
       {
         model: "deepseek-reasoner",
         promptVersion: "lca-deepseek-v1",
-        inputLayerIds: ["soil", "woodland"]
+        inputLayerIds: ["soil", "woodland"],
+        evidenceFeatures: request.evidence.features
       }
     );
     const attributes = layer.features?.[0]?.attributes;
@@ -131,20 +132,25 @@ describe("createLcaLayerFromDraft", () => {
     const codeAnatomy = JSON.parse(attributes?.codeAnatomy ?? "[]") as {
       segment: string;
       sourceLayerId: string;
+      sourceFeatureId?: string;
+      sourceValue: string;
     }[];
     const evidenceCitations = JSON.parse(
       attributes?.evidenceCitations ?? "[]"
-    ) as { sourceLayerId: string; excerpt: string }[];
+    ) as { sourceLayerId: string; sourceFeatureId?: string; excerpt: string }[];
 
     assert.deepEqual(
       codeAnatomy.map((segment) => segment.segment),
       ["LO", "WD"]
     );
+    assert.equal(codeAnatomy[0]?.sourceFeatureId, "soil-a");
+    assert.equal(codeAnatomy[0]?.sourceValue, "loam");
     assert.deepEqual(
       evidenceCitations.map((citation) => citation.sourceLayerId),
-      ["soil", "woodland"]
+      ["soil"]
     );
-    assert.match(evidenceCitations[0]?.excerpt ?? "", /soil loam/);
+    assert.equal(evidenceCitations[0]?.sourceFeatureId, "soil-a");
+    assert.match(evidenceCitations[0]?.excerpt ?? "", /soil: loam/);
   });
 });
 

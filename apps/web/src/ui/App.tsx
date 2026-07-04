@@ -355,7 +355,9 @@ function LayerInspector() {
                     <span>{formatLabel(segment.theme)}</span>
                     <p>{segment.meaning}</p>
                     <small>
-                      {segment.sourceLayerId} / {Math.round(segment.confidence * 100)}%
+                      {segment.sourceLayerId}
+                      {segment.sourceFeatureId ? ` / ${segment.sourceFeatureId}` : ""} /{" "}
+                      {Math.round(segment.confidence * 100)}%
                     </small>
                   </article>
                 ))}
@@ -369,7 +371,10 @@ function LayerInspector() {
                 {lcaEvidenceCitations.map((citation) => (
                   <li key={citation.id}>
                     <strong>{citation.label}</strong>
-                    <span>{citation.sourceLayerId}</span>
+                    <span>
+                      {citation.sourceLayerId}
+                      {citation.sourceFeatureId ? ` / ${citation.sourceFeatureId}` : ""}
+                    </span>
                     <p>{citation.excerpt}</p>
                   </li>
                 ))}
@@ -510,6 +515,7 @@ interface InspectorCodeSegment {
   position: number;
   theme: string;
   sourceLayerId: string;
+  sourceFeatureId?: string;
   meaning: string;
   confidence: number;
 }
@@ -517,6 +523,7 @@ interface InspectorCodeSegment {
 interface InspectorEvidenceCitation {
   id: string;
   sourceLayerId: string;
+  sourceFeatureId?: string;
   label: string;
   excerpt: string;
 }
@@ -539,6 +546,7 @@ function parseLcaCodeAnatomy(value?: string): InspectorCodeSegment[] {
         position: getNumber(item.position, index + 1),
         theme: getString(item.theme, "landscape-character"),
         sourceLayerId: getString(item.sourceLayerId, "derived-lca"),
+        sourceFeatureId: getOptionalString(item.sourceFeatureId),
         meaning: getString(item.meaning, "Draft knowledge-bank segment."),
         confidence: getNumber(item.confidence, 0.5)
       }
@@ -557,6 +565,7 @@ function parseLcaEvidenceCitations(value?: string): InspectorEvidenceCitation[] 
       {
         id: getString(item.id, `citation-${index + 1}`),
         sourceLayerId: getString(item.sourceLayerId, "derived-lca"),
+        sourceFeatureId: getOptionalString(item.sourceFeatureId),
         label: getString(item.label, `Evidence ${index + 1}`),
         excerpt: getString(item.excerpt, "No evidence excerpt stored.")
       }
@@ -579,6 +588,10 @@ function parseJsonArray(value?: string): unknown[] {
 
 function getString(value: unknown, fallback: string) {
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function getOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function getNumber(value: unknown, fallback: number) {

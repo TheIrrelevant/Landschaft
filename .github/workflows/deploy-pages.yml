@@ -1,9 +1,9 @@
 ---
 # type: github-actions-workflow
 # description: Builds and deploys the Landschaft web editor to GitHub Pages.
-# last-updated: 2026-07-02
+# last-updated: 2026-07-04
 # last-model: codex-gpt-5
-# last-change: publish the static demo branch with bundled safe dataset data
+# last-change: update Pages deployment actions for current GitHub runners
 name: Deploy Pages
 
 on:
@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
       - name: Build web
         run: npm run build -w @landschaft/shared && npm run build -w @landschaft/web
         env:
@@ -45,7 +48,7 @@ jobs:
           VITE_LANDSCHAFT_STATIC_SAFE_DATA_URL: /Landschaft/test-data/boulder-flatirons/import.json
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: apps/web/dist
 
@@ -59,4 +62,4 @@ jobs:
     steps:
       - name: Deploy artifact
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

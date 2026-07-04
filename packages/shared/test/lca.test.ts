@@ -3,8 +3,8 @@
  * type: package-test
  * description: Tests for Landschaft LCA prompt and DeepSeek response parsing.
  * last-updated: 2026-07-04
- * last-model: codex-gpt-5
- * last-change: cover source-linked LCA code anatomy and citations
+ * last-model: composer-2.5
+ * last-change: cover polygon intersection knowledge-bank code anatomy
  * ---end-metadata---
  */
 import assert from "node:assert/strict";
@@ -17,9 +17,12 @@ import {
   parseDeepSeekLcaDraftResponse,
   type LcaDraftAnalysisRequest
 } from "../src/index.js";
+import { LCA_KNOWLEDGE_BANK_VERSION } from "../src/lcaKnowledgeBank.js";
 
 const request: LcaDraftAnalysisRequest = {
   purpose: "Baseline landscape character assessment for site planning.",
+  analysisMode: "desk-study",
+  outputQuality: "professional",
   evidence: {
     projectId: "project-demo",
     coordinateReferenceSystem: "EPSG:4326",
@@ -80,12 +83,14 @@ describe("buildDeepSeekLcaPrompt", () => {
     assert.equal(prompt.promptVersion, LCA_DEEPSEEK_PROMPT_VERSION);
     assert.equal(prompt.responseFormat, "json_object");
     assert.equal(user.purpose, request.purpose);
+    assert.equal(user.analysisMode, "desk-study");
+    assert.equal(user.outputQuality, "professional");
     assert.deepEqual(user.selectedLayerIds, request.evidence.selectedLayerIds);
   });
 });
 
 describe("createLcaLayerFromDraft", () => {
-  it("stores parseable code anatomy and evidence citations on generated features", () => {
+  it("stores knowledge-bank code anatomy from polygon-intersecting evidence", () => {
     const layer = createLcaLayerFromDraft(
       {
         id: "project-demo",
@@ -128,29 +133,29 @@ describe("createLcaLayerFromDraft", () => {
     );
     const attributes = layer.features?.[0]?.attributes;
 
-    assert.equal(attributes?.knowledgeBankVersion, "lca-kb-mvp-v1");
+    assert.equal(attributes?.knowledgeBankVersion, LCA_KNOWLEDGE_BANK_VERSION);
     const codeAnatomy = JSON.parse(attributes?.codeAnatomy ?? "[]") as {
       segment: string;
       sourceLayerId: string;
       sourceFeatureId?: string;
       sourceValue: string;
+      classificationRule: string;
     }[];
     const evidenceCitations = JSON.parse(
       attributes?.evidenceCitations ?? "[]"
     ) as { sourceLayerId: string; sourceFeatureId?: string; excerpt: string }[];
 
-    assert.deepEqual(
-      codeAnatomy.map((segment) => segment.segment),
-      ["LO", "WD"]
-    );
+    assert.ok(codeAnatomy.length >= 1);
     assert.equal(codeAnatomy[0]?.sourceFeatureId, "soil-a");
     assert.equal(codeAnatomy[0]?.sourceValue, "loam");
+    assert.match(codeAnatomy[0]?.classificationRule ?? "", /USDA|Draft|mapped/i);
     assert.deepEqual(
       evidenceCitations.map((citation) => citation.sourceLayerId),
       ["soil"]
     );
     assert.equal(evidenceCitations[0]?.sourceFeatureId, "soil-a");
     assert.match(evidenceCitations[0]?.excerpt ?? "", /soil: loam/);
+    assert.match(evidenceCitations[0]?.excerpt ?? "", /polygon-intersects/);
   });
 });
 

@@ -2,12 +2,13 @@
  * ---metadata---
  * type: package-source
  * description: Serialize Landschaft project layers into coordinate-based LLM map evidence.
- * last-updated: 2026-06-28
- * last-model: composer
- * last-change: add map read evidence builder for LCA analysis
+ * last-updated: 2026-07-04
+ * last-model: composer-2.5
+ * last-change: infer overlap, adjacency, containment, and proximity relationships
  * ---end-metadata---
  */
 import type { Coordinate, MapReadRequest, PlanningLayer, ProjectMetadata } from "./index.js";
+import { inferSpatialRelationshipType } from "./lcaEvidenceMatching.js";
 
 export interface MapEvidenceFeature {
   id: string;
@@ -31,7 +32,7 @@ export interface MapLayerSummary {
 }
 
 export interface MapSpatialRelationship {
-  type: "overlap" | "adjacency" | "extent";
+  type: "overlap" | "adjacency" | "containment" | "proximity" | "extent";
   description: string;
   layerIds: string[];
 }
@@ -143,25 +144,50 @@ function buildSpatialRelationships(
   layers: PlanningLayer[],
   project: ProjectMetadata
 ): MapSpatialRelationship[] {
-  const polygonLayers = layers.filter((layer) =>
-    (layer.features ?? []).some((feature) => feature.geometryType === "polygon")
+  const features = layers.flatMap((layer) =>
+    (layer.features ?? []).map((feature) => ({
+      id: feature.id,
+      layerId: layer.id,
+      layerName: layer.name,
+      label: feature.label,
+      geometryType: feature.geometryType,
+      coordinates: feature.coordinates,
+      attributes: feature.attributes
+    }))
   );
 
-  return [
+  const relationships: MapSpatialRelationship[] = [
     {
       type: "extent",
       description: `Project extent spans ${Math.round(project.realWorldExtentMeters.width)} m by ${Math.round(project.realWorldExtentMeters.depth)} m.`,
       layerIds: layers.map((layer) => layer.id)
-    },
-    ...(polygonLayers.length > 1
-      ? [
-          {
-            type: "overlap" as const,
-            description:
-              "Multiple polygon layers are available for character boundary inference.",
-            layerIds: polygonLayers.map((layer) => layer.id)
-          }
-        ]
-      : [])
+    }
   ];
+
+  const seen = new Set<string>();
+
+  for (let leftIndex = 0; leftIndex < features.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < features.length; rightIndex += 1) {
+      const left = features[leftIndex];
+      const right = features[rightIndex];
+      const relationshipType = inferSpatialRelationshipType(left, right);
+      if (!relationshipType) {
+        continue;
+      }
+
+      const key = [relationshipType, left.id, right.id].sort().join(":");
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+
+      relationships.push({
+        type: relationshipType,
+        description: `${left.layerName}/${left.label} ${relationshipType}s ${right.layerName}/${right.label}.`,
+        layerIds: [left.layerId, right.layerId]
+      });
+    }
+  }
+
+  return relationships;
 }

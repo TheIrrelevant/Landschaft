@@ -4,7 +4,7 @@
  * description: Landscape Character Assessment draft generation and layer mapping for Landschaft.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: link LCA metadata to intersecting evidence features
+ * last-change: polygon intersection, dominant scoring, and knowledge-bank code assembly
  * ---end-metadata---
  */
 import type {
@@ -17,10 +17,23 @@ import type {
   VectorFeature
 } from "./index.js";
 import type { MapEvidenceFeature, MapReadResult } from "./mapEvidence.js";
+import {
+  findIntersectingEvidence,
+  scoreDominantThemeValues
+} from "./lcaEvidenceMatching.js";
+import {
+  LCA_KNOWLEDGE_BANK_VERSION,
+  type LcaCodeTheme
+} from "./lcaKnowledgeBank.js";
+
+export type LcaAnalysisMode = "desk-study" | "field-validation" | "classification";
+export type LcaOutputQuality = "conceptual" | "professional" | "report-ready";
 
 export interface LcaDraftAnalysisRequest {
   purpose: string;
   evidence: MapReadResult;
+  analysisMode?: LcaAnalysisMode;
+  outputQuality?: LcaOutputQuality;
 }
 
 export interface LcaDraftAnalysisResult {
@@ -77,16 +90,6 @@ const LCA_LAYER_ID = "landscape-character-assessment";
 const LCA_PROMPT_VERSION = "lca-mvp-v1";
 export const LCA_DEEPSEEK_MODEL = "deepseek-reasoner";
 export const LCA_DEEPSEEK_PROMPT_VERSION = "lca-deepseek-v1";
-const LCA_KNOWLEDGE_BANK_VERSION = "lca-kb-mvp-v1";
-const LCA_CODE_THEMES = [
-  "topography",
-  "slope",
-  "geology",
-  "soil",
-  "vegetation",
-  "land-use"
-] as const;
-
 export function generateLcaCodedId() {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
   return Array.from({ length: 10 }, () => {
@@ -105,7 +108,7 @@ export function generateMockLcaDraft(
   const areas =
     polygonFeatures.length > 0
       ? polygonFeatures.slice(0, 4).map((feature, index) =>
-          codedAreaFromEvidenceFeature(feature, request.purpose, index)
+          codedAreaFromEvidenceFeature(feature, request.purpose, index, request.evidence.features)
         )
       : defaultExtentCharacterAreas(request.evidence, request.purpose);
 
@@ -137,6 +140,8 @@ export function buildDeepSeekLcaPrompt(
       {
         task: "Draft candidate Landscape Character Assessment areas.",
         purpose: request.purpose,
+        analysisMode: request.analysisMode ?? "desk-study",
+        outputQuality: request.outputQuality ?? "professional",
         coordinateSpace: request.evidence.coordinateSpace,
         coordinateReferenceSystem: request.evidence.coordinateReferenceSystem,
         projectExtent: request.evidence.projectExtent,
@@ -289,14 +294,19 @@ export function applyMapWriteDraft(
 function codedAreaFromEvidenceFeature(
   feature: MapEvidenceFeature,
   purpose: string,
-  index: number
+  index: number,
+  evidenceFeatures: MapEvidenceFeature[]
 ): CodedArea {
+  const ring = closeRing(feature.coordinates);
+  const dominants = scoreDominantThemeValues(ring, evidenceFeatures);
+  const code = assembleCharacterCode(ring, feature.attributes, dominants);
+
   return {
     id: generateLcaCodedId(),
     label: feature.label || `Character Area ${index + 1}`,
-    ring: closeRing(feature.coordinates),
+    ring,
     layer: "lca",
-    code: deriveCharacterCode(feature.attributes),
+    code,
     meaning: buildCharacterMeaning(feature, purpose),
     confidence: clampConfidence(0.66 + index * 0.05)
   };
@@ -351,10 +361,10 @@ function codedAreaToVectorFeature(
     "model" | "promptVersion" | "inputLayerIds" | "evidenceFeatures"
   >
 ): VectorFeature {
-  const relevantEvidence = findRelevantEvidenceFeatures(
-    area,
+  const relevantEvidence = findIntersectingEvidence(
+    area.ring,
     analysis.evidenceFeatures ?? []
-  );
+  ).map((match) => match.feature);
   const codeAnatomy = buildCodeAnatomy(
     area,
     analysis.inputLayerIds,
@@ -406,48 +416,48 @@ function buildCodeAnatomy(
   inputLayerIds: string[],
   evidenceFeatures: MapEvidenceFeature[]
 ): LcaCodeAnatomySegment[] {
+  const dominants = scoreDominantThemeValues(area.ring, evidenceFeatures);
+  if (dominants.length > 0) {
+    return dominants.map((dominant, index) => ({
+      segment: dominant.knowledgeBankEntry.codeSegment,
+      position: index + 1,
+      theme: dominant.theme,
+      sourceLayerId: dominant.sourceLayerId,
+      sourceFeatureId: dominant.sourceFeatureId,
+      sourceAttribute: dominant.sourceAttribute,
+      sourceValue: dominant.sourceValue,
+      meaning: `${dominant.knowledgeBankEntry.codeSegment} maps ${dominant.sourceValue} to ${dominant.knowledgeBankEntry.meaning}`,
+      classificationRule: dominant.knowledgeBankEntry.classificationRule,
+      confidence: clampConfidence(area.confidence * Math.max(dominant.coverageRatio, 0.1)),
+      version: dominant.knowledgeBankEntry.version
+    }));
+  }
+
   const segments = splitCharacterCode(area.code);
   const sourceLayerIds = inputLayerIds.length ? inputLayerIds : ["derived-lca"];
 
   return segments.map((segment, index) => {
-    const theme = LCA_CODE_THEMES[index % LCA_CODE_THEMES.length];
-    const evidenceFeature = evidenceFeatures[index % evidenceFeatures.length];
-    const sourceLayerId =
-      evidenceFeature?.layerId ?? sourceLayerIds[index % sourceLayerIds.length];
-    const sourceAttribute = findThemeAttribute(
-      evidenceFeature?.attributes ?? {},
-      theme
-    );
-    const fallbackAttribute = evidenceFeature
-      ? Object.keys(evidenceFeature.attributes)[0]
-      : undefined;
-    const selectedAttribute = sourceAttribute ?? fallbackAttribute;
-    const sourceValue = sourceAttribute
-      ? evidenceFeature?.attributes[sourceAttribute] ?? segment
-      : selectedAttribute
-        ? evidenceFeature?.attributes[selectedAttribute] ?? segment
-      : segment;
+    const theme = fallbackThemeForIndex(index);
+    const evidenceFeature = evidenceFeatures[index % Math.max(evidenceFeatures.length, 1)];
 
     return {
       segment,
       position: index + 1,
       theme,
-      sourceLayerId,
+      sourceLayerId:
+        evidenceFeature?.layerId ?? sourceLayerIds[index % sourceLayerIds.length],
       sourceFeatureId: evidenceFeature?.id,
-      sourceAttribute: selectedAttribute ?? theme,
-      sourceValue,
-      meaning: evidenceFeature
-        ? `${segment} is a draft ${formatTheme(theme)} code segment for ${area.label}, linked to ${evidenceFeature.label} from ${evidenceFeature.layerName}.`
-        : `${segment} is a draft ${formatTheme(theme)} code segment for ${area.label}.`,
+      sourceAttribute: theme,
+      sourceValue: segment,
+      meaning: `${segment} is a draft ${formatTheme(theme)} code segment for ${area.label}.`,
       classificationRule:
-        evidenceFeature
-          ? "Draft MVP mapping selected from source features whose project-metre bounds intersect the LCA area."
-          : "Draft MVP mapping assembled from selected LCA evidence and pending knowledge-bank review.",
+        "Fallback draft mapping used when no polygon-intersecting dominant evidence was available.",
       confidence: area.confidence,
       version: LCA_KNOWLEDGE_BANK_VERSION
     };
   });
 }
+
 
 function buildEvidenceCitations(
   area: CodedArea,
@@ -476,15 +486,6 @@ function buildEvidenceCitations(
   }));
 }
 
-function findRelevantEvidenceFeatures(
-  area: CodedArea,
-  evidenceFeatures: MapEvidenceFeature[]
-) {
-  const areaBounds = getBounds(area.ring);
-  return evidenceFeatures.filter((feature) =>
-    boundsIntersect(areaBounds, getBounds(feature.coordinates))
-  );
-}
 
 function buildEvidenceExcerpt(feature: MapEvidenceFeature, area: CodedArea) {
   const attributes = Object.entries(feature.attributes)
@@ -493,15 +494,40 @@ function buildEvidenceExcerpt(feature: MapEvidenceFeature, area: CodedArea) {
     .join("; ");
 
   return attributes
-    ? `${feature.label} intersects ${area.label}. Evidence: ${attributes}.`
-    : `${feature.label} intersects ${area.label} in project-metre space.`;
+    ? `${feature.label} polygon-intersects ${area.label}. Evidence: ${attributes}.`
+    : `${feature.label} polygon-intersects ${area.label} in project-metre space.`;
+}
+
+
+function assembleCharacterCode(
+  ring: Coordinate[],
+  attributes: Record<string, string>,
+  dominants: ReturnType<typeof scoreDominantThemeValues>
+) {
+  if (dominants.length > 0) {
+    return dominants.map((dominant) => dominant.knowledgeBankEntry.codeSegment).join("");
+  }
+
+  return deriveCharacterCode(attributes);
+}
+
+function fallbackThemeForIndex(index: number): LcaCodeTheme {
+  const themes: LcaCodeTheme[] = [
+    "topography",
+    "slope",
+    "geology",
+    "soil",
+    "vegetation",
+    "land-use"
+  ];
+  return themes[index % themes.length];
 }
 
 function findThemeAttribute(
   attributes: Record<string, string>,
-  theme: (typeof LCA_CODE_THEMES)[number]
+  theme: LcaCodeTheme
 ) {
-  const candidates: Record<(typeof LCA_CODE_THEMES)[number], string[]> = {
+  const candidates: Record<LcaCodeTheme, string[]> = {
     topography: ["elevation", "height", "contourelevation", "slope"],
     slope: ["slope", "gradient", "aspect"],
     geology: ["geology", "parentMaterial", "lithology", "bedrock"],
@@ -511,34 +537,6 @@ function findThemeAttribute(
   };
 
   return candidates[theme].find((key) => attributes[key]);
-}
-
-type Bounds = {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-};
-
-function getBounds(coordinates: Coordinate[]): Bounds {
-  return coordinates.reduce(
-    (bounds, coordinate) => ({
-      minX: Math.min(bounds.minX, coordinate[0]),
-      minY: Math.min(bounds.minY, coordinate[1]),
-      maxX: Math.max(bounds.maxX, coordinate[0]),
-      maxY: Math.max(bounds.maxY, coordinate[1])
-    }),
-    {
-      minX: Number.POSITIVE_INFINITY,
-      minY: Number.POSITIVE_INFINITY,
-      maxX: Number.NEGATIVE_INFINITY,
-      maxY: Number.NEGATIVE_INFINITY
-    }
-  );
-}
-
-function boundsIntersect(a: Bounds, b: Bounds) {
-  return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
 }
 
 function splitCharacterCode(code: string) {

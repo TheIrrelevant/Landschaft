@@ -1319,9 +1319,27 @@ export {
   LCA_DEEPSEEK_PROMPT_VERSION,
   parseDeepSeekLcaDraftResponse,
   type DeepSeekLcaPrompt,
+  type LcaAnalysisMode,
   type LcaCodeAnatomySegment,
   type LcaEvidenceCitation,
   type LcaDraftAnalysisRequest,
   type LcaDraftAnalysisResult,
+  type LcaOutputQuality,
   type MapWriteDraftResult
 } from "./lca.js";
+
+export {
+  createKnowledgeBankStore,
+  createPendingKnowledgeBankEntry,
+  LCA_CODE_THEMES,
+  LCA_KNOWLEDGE_BANK_VERSION,
+  type KnowledgeBankEntry,
+  type LcaCodeTheme
+} from "./lcaKnowledgeBank.js";
+
+export {
+  findIntersectingEvidence,
+  scoreDominantThemeValues,
+  type DominantThemeValue,
+  type IntersectingEvidenceMatch
+} from "./lcaEvidenceMatching.js";

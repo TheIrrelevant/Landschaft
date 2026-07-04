@@ -4,13 +4,15 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: call MCP LCA analysis before local mock fallback
+ * last-change: add explicit LCA analysis workflow mode and backend parameters
  * ---end-metadata---
  */
 import {
   buildMapEvidence,
   createLcaLayerFromDraft,
   generateMockLcaDraft,
+  type LcaAnalysisMode,
+  type LcaOutputQuality,
   getDefaultLcaInputLayerIds,
   createProjectFitRasterGeoreference,
   generateTerrainProject,
@@ -39,6 +41,7 @@ import {
 } from "../geo/projectGeometry";
 
 type EditorMode = "top-view" | "terrain-3d";
+type EditorWorkflowMode = "design" | "lca-analysis";
 type SafeDatasetId =
   | "naip-ortho"
   | "dem-3dep"
@@ -127,6 +130,9 @@ interface EditorState {
   lcaSelectedLayerIds: string[];
   lcaAnalyzing: boolean;
   lcaAnalysisError: string | null;
+  workflowMode: EditorWorkflowMode;
+  lcaAnalysisMode: LcaAnalysisMode;
+  lcaOutputQuality: LcaOutputQuality;
   coordinateStep: number | null;
   inspectorOpen: boolean;
   activeMode: EditorMode;
@@ -163,6 +169,10 @@ interface EditorState {
   selectFeatureVertex: (vertexIndex: number | null) => void;
   setLcaPurpose: (purpose: string) => void;
   toggleLcaInputLayer: (layerId: string) => void;
+  enterLcaAnalysisMode: () => void;
+  exitLcaAnalysisMode: () => void;
+  setLcaAnalysisMode: (mode: LcaAnalysisMode) => void;
+  setLcaOutputQuality: (quality: LcaOutputQuality) => void;
   runLcaDraftAnalysis: () => Promise<void>;
   setSelectedFeatureReviewStatus: (reviewStatus: ReviewStatus) => void;
   setSelectedLayerReviewStatus: (reviewStatus: ReviewStatus) => void;
@@ -855,6 +865,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   lcaSelectedLayerIds: [],
   lcaAnalyzing: false,
   lcaAnalysisError: null,
+  workflowMode: "design",
+  lcaAnalysisMode: "desk-study",
+  lcaOutputQuality: "professional",
   hoveredFeatureId: null,
   hoveredLayerId: null,
   selectedArea: null,
@@ -880,6 +893,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       };
       const layers = insertOrReplaceLayer(state.layers, layer);
       const nextState = {
+        workflowMode: "lca-analysis" as const,
         activeMode: "top-view" as const,
         layers,
         selectedLayerId: layer.id,
@@ -895,6 +909,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const layer = createImportedGeoJsonLayer(state.project, fileName, fileText);
       const layers = insertOrReplaceLayer(state.layers, layer);
       const nextState = {
+        workflowMode: "lca-analysis" as const,
         activeMode: "top-view" as const,
         layers,
         selectedLayerId: layer.id,
@@ -910,6 +925,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const layer = createImportedKmlLayer(state.project, fileName, fileText);
       const layers = insertOrReplaceLayer(state.layers, layer);
       const nextState = {
+        workflowMode: "lca-analysis" as const,
         activeMode: "top-view" as const,
         layers,
         selectedLayerId: layer.id,
@@ -947,6 +963,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       );
       const layers = insertOrReplaceLayer(state.layers, layer);
       const nextState = {
+        workflowMode: "lca-analysis" as const,
         activeMode: "top-view" as const,
         layers,
         selectedLayerId: layer.id,
@@ -1435,6 +1452,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           : [...state.lcaSelectedLayerIds, layerId]
       };
     }),
+  enterLcaAnalysisMode: () =>
+    set({
+      workflowMode: "lca-analysis",
+      activeMode: "top-view",
+      inspectorOpen: true
+    }),
+  exitLcaAnalysisMode: () => set({ workflowMode: "design" }),
+  setLcaAnalysisMode: (mode) => set({ lcaAnalysisMode: mode }),
+  setLcaOutputQuality: (quality) => set({ lcaOutputQuality: quality }),
   runLcaDraftAnalysis: async () => {
     const state = get();
     set({ lcaAnalyzing: true, lcaAnalysisError: null });
@@ -1456,7 +1482,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           state.project.id,
           selectedLayerIds,
           state.lcaPurpose,
-          toProjectSnapshot(state)
+          toProjectSnapshot(state),
+          state.lcaAnalysisMode,
+          state.lcaOutputQuality
         );
         layer = result.layer;
       } catch (backendError) {
@@ -1470,7 +1498,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         );
         const analysis = generateMockLcaDraft({
           purpose: state.lcaPurpose,
-          evidence
+          evidence,
+          analysisMode: state.lcaAnalysisMode,
+          outputQuality: state.lcaOutputQuality
         });
         layer = createLcaLayerFromDraft(state.project, analysis.areas, analysis);
         fallbackMessage = `MCP LCA backend unavailable; generated a local mock draft. ${
@@ -1480,6 +1510,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       const layers = insertOrReplaceLayer(state.layers, layer);
       const nextState = {
+        workflowMode: "lca-analysis" as const,
         activeMode: "top-view" as const,
         layers,
         lcaAnalyzing: false,
@@ -1824,7 +1855,9 @@ async function fetchLcaAnalysis(
   projectId: string,
   selectedLayerIds: string[],
   purpose: string,
-  projectSnapshot: ProjectSnapshot
+  projectSnapshot: ProjectSnapshot,
+  analysisMode: LcaAnalysisMode,
+  outputQuality: LcaOutputQuality
 ): Promise<LcaBackendAnalysisResult> {
   let response: Response;
 
@@ -1835,6 +1868,8 @@ async function fetchLcaAnalysis(
         selectedLayerIds,
         geometryDetail: "simplified",
         purpose,
+        analysisMode,
+        outputQuality,
         projectSnapshot
       }),
       headers: {

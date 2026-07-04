@@ -4,7 +4,7 @@
  * description: MCP handlers for DeepSeek-backed Landschaft LCA analysis.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: add DeepSeek LCA analysis handler
+ * last-change: pass explicit LCA analysis mode and output quality
  * ---end-metadata---
  */
 import {
@@ -19,6 +19,8 @@ import {
 
 export interface LcaAnalyzeRequest extends MapReadRequest {
   purpose: string;
+  analysisMode?: "desk-study" | "field-validation" | "classification";
+  outputQuality?: "conceptual" | "professional" | "report-ready";
   dryRun?: boolean;
 }
 
@@ -39,7 +41,9 @@ export async function handleLcaAnalyze(
   );
   const prompt = buildDeepSeekLcaPrompt({
     purpose: request.purpose,
-    evidence
+    evidence,
+    analysisMode: request.analysisMode,
+    outputQuality: request.outputQuality
   });
 
   if (request.dryRun) {
@@ -53,7 +57,9 @@ export async function handleLcaAnalyze(
   const rawResponse = await requestDeepSeekLca(prompt);
   const analysis = parseDeepSeekLcaDraftResponse(rawResponse, {
     purpose: request.purpose,
-    evidence
+    evidence,
+    analysisMode: request.analysisMode,
+    outputQuality: request.outputQuality
   });
   const layer = createLcaLayerFromDraft(snapshot.project, analysis.areas, analysis);
 

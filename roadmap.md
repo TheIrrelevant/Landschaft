@@ -3,7 +3,7 @@ type: roadmap
 description: Product roadmap for the Landschaft web-based landscape planning editor.
 last-updated: 2026-07-04
 last-model: codex-gpt-5
-last-change: link LCA metadata to intersecting source features
+last-change: complete checkpoint 3 with polygon intersection and LCA analysis mode
 ---
 
 # Landschaft Roadmap
@@ -1680,7 +1680,7 @@ Out of scope for the first version:
 
 ### Checkpoint 3 Progress Status
 
-Status: In progress.
+Status: Complete for the MVP LCA workflow.
 
 Implemented so far:
 
@@ -1695,11 +1695,14 @@ Implemented so far:
 - The web editor draft LCA action now calls the MCP `/lca/analyze` endpoint with the current project snapshot and selected evidence layers, then falls back to the local mock draft generator when the backend is unavailable.
 - Generated LCA features now store draft knowledge-bank code anatomy and evidence citation metadata, and the inspector displays both as dedicated review sections instead of raw JSON attributes.
 - Draft code anatomy and evidence citations are now linked to source evidence features whose project-metre bounds intersect each generated character area, preserving source layer and feature identifiers for review.
+- Polygon intersection and dominant-value scoring now select knowledge-bank code segments from reviewed and pending entries.
+- The web editor provides an explicit LCA analysis mode panel for purpose, scope, layer selection, and draft analysis runs.
 
-Next remaining work:
+Completion notes:
 
-- Replace bbox-based evidence matching with polygon intersection, dominant-value scoring, and reusable reviewed knowledge-bank entries.
-- Add explicit LCA analysis mode and richer spatial relationship inference.
+- Polygon intersection, dominant-value scoring, and reusable reviewed knowledge-bank entries now drive draft code anatomy and evidence citations.
+- The web editor exposes an explicit LCA analysis mode with purpose, analysis mode, output quality, and input-layer selection.
+- Map evidence serialization now infers overlap, adjacency, containment, and proximity relationships between selected features.
 
 ## 4. Forces For Change And Sensitivity Capacity Assessment
 

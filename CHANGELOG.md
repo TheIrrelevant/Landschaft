@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-04
 last-model: codex-gpt-5
-last-change: link LCA citations to intersecting evidence features
+last-change: complete checkpoint 3 LCA workflow
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Completed Checkpoint 3 with polygon-intersecting evidence matching, dominant-value knowledge-bank code assembly, richer spatial relationship inference, and an explicit LCA analysis mode panel in the web editor.
 - Linked draft LCA code anatomy and evidence citations to selected source features whose project-metre bounds intersect each generated character area.
 - Added draft LCA knowledge-bank code anatomy and evidence citation metadata to generated character features, with dedicated inspector panels for review.
 - Connected the web draft LCA action to the MCP `/lca/analyze` endpoint, using DeepSeek-backed backend results when available and preserving the local mock draft as a fallback.

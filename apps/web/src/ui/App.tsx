@@ -4,7 +4,7 @@
  * description: Main Landschaft editor shell.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: show LCA code anatomy and evidence citations in inspector
+ * last-change: mount explicit LCA analysis mode panel in sidebar
  * ---end-metadata---
  */
 import {
@@ -23,6 +23,7 @@ import { useState } from "react";
 import { TerrainScene } from "../scene/TerrainScene";
 import { useEditorStore } from "../state/editorStore";
 import { LandschaftLogo } from "./LandschaftLogo";
+import { LcaAnalysisPanel } from "./LcaAnalysisPanel";
 import { LayersPanel } from "./LayersPanel";
 import { TerrainSetupPanel } from "./TerrainSetupPanel";
 import { ToolDock } from "./ToolDock";
@@ -43,6 +44,7 @@ export function App() {
             <strong>Landschaft</strong>
           </header>
           <TerrainSetupPanel />
+          <LcaAnalysisPanel />
           <LayersPanel />
           <UserPanel />
         </div>

@@ -4,7 +4,7 @@
  * description: Bottom-center canvas tool dock for map imports, vector drawing, and draft LCA actions.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: show LCA backend fallback status
+ * last-change: open explicit LCA analysis mode from tool dock
  * ---end-metadata---
  */
 import { Map, MapPin, Pentagon, Route, Shapes, Sparkles } from "lucide-react";
@@ -23,7 +23,7 @@ export function ToolDock() {
     lcaAnalyzing,
     lcaAnalysisError,
     project,
-    runLcaDraftAnalysis,
+    enterLcaAnalysisMode,
     terrainGenerated
   } = useEditorStore();
   const [toolError, setToolError] = useState<string | null>(null);
@@ -91,18 +91,14 @@ export function ToolDock() {
       <div className="tool-dock-separator" />
 
       <button
-        aria-label="Run draft LCA analysis"
+        aria-label="Open LCA analysis mode"
         className="tool-dock-button"
         disabled={!terrainGenerated || !hasLcaInputs || lcaAnalyzing}
         onClick={() => {
           setToolError(null);
-          runLcaDraftAnalysis().catch((error: unknown) => {
-            setToolError(
-              error instanceof Error ? error.message : "LCA analysis failed."
-            );
-          });
+          enterLcaAnalysisMode();
         }}
-        title="Run draft LCA analysis"
+        title="Open LCA analysis mode"
         type="button"
       >
         <Sparkles size={18} strokeWidth={1.75} />

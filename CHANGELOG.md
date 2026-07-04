@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-04
 last-model: codex-gpt-5
-last-change: avoid stale demo snapshots hiding orthophoto
+last-change: keep woodland from rendering as a flat raster plane
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Kept woodland out of the generic raster plane texture path so enabling it renders woodland markers without covering the terrain surface.
 - Ignored stale browser project snapshots in static demo mode so updated bundled orthophoto and layer defaults are used after deploys.
 - Kept the bundled NAIP orthophoto visible below the 100% woodland mask layer by excluding woodland markers from full-raster suppression.
 - Aligned the safe dataset demo layer stack order and default opacities with the requested map-reading sequence.

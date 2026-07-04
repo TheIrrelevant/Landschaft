@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: keep orthophoto visible below woodland mask layer
+ * last-change: keep woodland out of generic raster texture rendering
  * ---end-metadata---
  */
 import {
@@ -1822,6 +1822,45 @@ function WoodlandMarkerMesh({
   );
 }
 
+function RasterPlaneLayer({
+  clippingPlanes,
+  layer,
+  placement,
+  renderOrder
+}: {
+  clippingPlanes?: THREE.Plane[];
+  layer: PlanningLayer;
+  placement: {
+    position: [number, number, number];
+    sizeX: number;
+    sizeZ: number;
+  };
+  renderOrder: number;
+}) {
+  const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
+
+  return (
+    <mesh
+      position={placement.position}
+      renderOrder={renderOrder}
+      rotation={[-Math.PI / 2, 0, 0]}
+    >
+      <planeGeometry args={[placement.sizeX, placement.sizeZ]} />
+      <meshBasicNodeMaterial
+        clippingPlanes={clippingPlanes}
+        clipIntersection={false}
+        color={new Color(layer.style?.fill ?? "#4aa3cf")}
+        depthTest={false}
+        depthWrite={false}
+        map={rasterTexture ?? undefined}
+        opacity={layer.opacity}
+        side={FrontSide}
+        transparent={!isFullyOpaqueLayer(layer)}
+      />
+    </mesh>
+  );
+}
+
 function StructureModelLayer({
   layer,
   project,
@@ -2071,7 +2110,6 @@ function FoundationalLayerContent({
   const project = useEditorStore((state) => state.project);
   const selectFeatureInLayer = useEditorStore((state) => state.selectFeatureInLayer);
   const projectSpace = useMemo(() => getProjectSpace(project), [project]);
-  const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
   const stackLift = getLayerStackLift(layers, layer.id);
   const lift =
     layer.id === "safe-data-boundaries"
@@ -2131,24 +2169,12 @@ function FoundationalLayerContent({
     );
 
     return (
-      <mesh
-        position={placement.position}
+      <RasterPlaneLayer
+        clippingPlanes={clippingPlanes}
+        layer={layer}
+        placement={placement}
         renderOrder={renderOrder}
-        rotation={[-Math.PI / 2, 0, 0]}
-      >
-        <planeGeometry args={[placement.sizeX, placement.sizeZ]} />
-        <meshBasicNodeMaterial
-          clippingPlanes={clippingPlanes}
-          clipIntersection={false}
-          color={new Color(layer.style?.fill ?? "#4aa3cf")}
-          depthTest={false}
-          depthWrite={false}
-          map={rasterTexture ?? undefined}
-          opacity={layer.opacity}
-          side={FrontSide}
-          transparent={!isFullyOpaqueLayer(layer)}
-        />
-      </mesh>
+      />
     );
   }
 

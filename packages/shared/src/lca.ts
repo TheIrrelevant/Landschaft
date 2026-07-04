@@ -2,9 +2,9 @@
  * ---metadata---
  * type: package-source
  * description: Landscape Character Assessment draft generation and layer mapping for Landschaft.
- * last-updated: 2026-06-28
- * last-model: composer
- * last-change: add mock LCA draft generator and coded area layer writer
+ * last-updated: 2026-07-04
+ * last-model: codex-gpt-5
+ * last-change: add DeepSeek LCA prompt contract and response parser
  * ---end-metadata---
  */
 import type {
@@ -30,6 +30,15 @@ export interface LcaDraftAnalysisResult {
   inputLayerIds: string[];
 }
 
+export interface DeepSeekLcaPrompt {
+  model: string;
+  promptVersion: string;
+  system: string;
+  user: string;
+  responseFormat: "json_object";
+  temperature: number;
+}
+
 export interface MapWriteDraftResult {
   status: "draft-written";
   projectId: string;
@@ -42,6 +51,8 @@ export interface MapWriteDraftResult {
 
 const LCA_LAYER_ID = "landscape-character-assessment";
 const LCA_PROMPT_VERSION = "lca-mvp-v1";
+export const LCA_DEEPSEEK_MODEL = "deepseek-reasoner";
+export const LCA_DEEPSEEK_PROMPT_VERSION = "lca-deepseek-v1";
 
 export function generateLcaCodedId() {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -69,6 +80,94 @@ export function generateMockLcaDraft(
     areas,
     model: "landschaft-mock-lca",
     promptVersion: LCA_PROMPT_VERSION,
+    inputLayerIds: request.evidence.selectedLayerIds
+  };
+}
+
+export function buildDeepSeekLcaPrompt(
+  request: LcaDraftAnalysisRequest
+): DeepSeekLcaPrompt {
+  return {
+    model: LCA_DEEPSEEK_MODEL,
+    promptVersion: LCA_DEEPSEEK_PROMPT_VERSION,
+    responseFormat: "json_object",
+    temperature: 0.2,
+    system: [
+      "You are a landscape character assessment assistant for Landschaft.",
+      "Use Carys Swanwick Landscape Character Assessment principles.",
+      "Do not invent evidence outside the supplied map evidence.",
+      "Separate factual baseline interpretation from design judgement.",
+      "Return only valid JSON matching the requested schema."
+    ].join(" "),
+    user: JSON.stringify(
+      {
+        task: "Draft candidate Landscape Character Assessment areas.",
+        purpose: request.purpose,
+        coordinateSpace: request.evidence.coordinateSpace,
+        coordinateReferenceSystem: request.evidence.coordinateReferenceSystem,
+        projectExtent: request.evidence.projectExtent,
+        selectedLayerIds: request.evidence.selectedLayerIds,
+        layerSummaries: request.evidence.layerSummaries,
+        spatialRelationships: request.evidence.spatialRelationships,
+        features: request.evidence.features,
+        outputSchema: {
+          areas: [
+            {
+              id: "stable short lowercase id",
+              label: "human-readable character area name",
+              ring: [
+                [0, 0],
+                [100, 0],
+                [100, 100],
+                [0, 100],
+                [0, 0]
+              ],
+              layer: "lca",
+              code: "controlled landscape character code",
+              meaning:
+                "baseline character meaning with source evidence references and no unsupported claims",
+              confidence: 0.75
+            }
+          ]
+        },
+        constraints: [
+          "Coordinates must use project metres.",
+          "Each ring must contain at least four coordinates and be closed.",
+          "Each area must cite evidence inside meaning.",
+          "Confidence must be a number from 0 to 1.",
+          "Use fallback project-extent zones only when source geometry is insufficient."
+        ]
+      },
+      null,
+      2
+    )
+  };
+}
+
+export function parseDeepSeekLcaDraftResponse(
+  response: unknown,
+  request: LcaDraftAnalysisRequest
+): LcaDraftAnalysisResult {
+  const payload = parseJsonPayload(extractDeepSeekContent(response));
+  const areasValue = getRecordValue(payload, "areas");
+
+  if (!Array.isArray(areasValue)) {
+    throw new Error("DeepSeek LCA response must include an areas array.");
+  }
+
+  const areas = areasValue.map((area, index) =>
+    validateCodedArea(coerceCodedArea(area, index))
+  );
+
+  if (areas.length === 0) {
+    throw new Error("DeepSeek LCA response must include at least one area.");
+  }
+
+  return {
+    areas,
+    model: getStringValue(payload, "model") ?? LCA_DEEPSEEK_MODEL,
+    promptVersion:
+      getStringValue(payload, "promptVersion") ?? LCA_DEEPSEEK_PROMPT_VERSION,
     inputLayerIds: request.evidence.selectedLayerIds
   };
 }
@@ -304,4 +403,110 @@ function averageConfidence(areas: CodedArea[]) {
 
 function clampConfidence(value: number) {
   return Math.min(Math.max(value, 0), 1);
+}
+
+function extractDeepSeekContent(response: unknown): unknown {
+  if (typeof response === "string") {
+    return response;
+  }
+
+  if (!isRecord(response)) {
+    return response;
+  }
+
+  const choices = response.choices;
+  if (!Array.isArray(choices) || choices.length === 0 || !isRecord(choices[0])) {
+    return response;
+  }
+
+  const message = choices[0].message;
+  if (!isRecord(message)) {
+    return response;
+  }
+
+  return typeof message.content === "string" ? message.content : response;
+}
+
+function parseJsonPayload(value: unknown): Record<string, unknown> {
+  if (isRecord(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error("DeepSeek LCA response must be a JSON object or JSON string.");
+  }
+
+  const trimmed = value.trim();
+  const withoutFence = trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "");
+  const parsed = JSON.parse(withoutFence) as unknown;
+
+  if (!isRecord(parsed)) {
+    throw new Error("DeepSeek LCA response JSON must be an object.");
+  }
+
+  return parsed;
+}
+
+function coerceCodedArea(value: unknown, index: number): CodedArea {
+  if (!isRecord(value)) {
+    throw new Error(`DeepSeek LCA area ${index + 1} must be an object.`);
+  }
+
+  const ringValue = value.ring;
+  if (!Array.isArray(ringValue)) {
+    throw new Error(`DeepSeek LCA area ${index + 1} must include a ring.`);
+  }
+
+  return {
+    id: getStringValue(value, "id") ?? generateLcaCodedId(),
+    label: getStringValue(value, "label") ?? `Character Area ${index + 1}`,
+    ring: ringValue.map((coordinate, coordinateIndex) =>
+      coerceCoordinate(coordinate, index, coordinateIndex)
+    ),
+    layer: getStringValue(value, "layer") ?? "lca",
+    code: getStringValue(value, "code") ?? "LCA",
+    meaning:
+      getStringValue(value, "meaning") ??
+      "Draft landscape character area generated from supplied map evidence.",
+    confidence: getNumberValue(value, "confidence") ?? 0.5
+  };
+}
+
+function coerceCoordinate(
+  value: unknown,
+  areaIndex: number,
+  coordinateIndex: number
+): Coordinate {
+  if (
+    !Array.isArray(value) ||
+    value.length < 2 ||
+    typeof value[0] !== "number" ||
+    typeof value[1] !== "number"
+  ) {
+    throw new Error(
+      `DeepSeek LCA area ${areaIndex + 1} coordinate ${coordinateIndex + 1} must be [x, y].`
+    );
+  }
+
+  return [value[0], value[1]];
+}
+
+function getRecordValue(record: Record<string, unknown>, key: string) {
+  return record[key];
+}
+
+function getStringValue(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function getNumberValue(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

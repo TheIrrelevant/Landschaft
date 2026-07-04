@@ -1311,9 +1311,14 @@ export {
 
 export {
   applyMapWriteDraft,
+  buildDeepSeekLcaPrompt,
   createLcaLayerFromDraft,
   generateLcaCodedId,
   generateMockLcaDraft,
+  LCA_DEEPSEEK_MODEL,
+  LCA_DEEPSEEK_PROMPT_VERSION,
+  parseDeepSeekLcaDraftResponse,
+  type DeepSeekLcaPrompt,
   type LcaDraftAnalysisRequest,
   type LcaDraftAnalysisResult,
   type MapWriteDraftResult

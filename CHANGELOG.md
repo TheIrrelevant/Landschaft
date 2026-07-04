@@ -1,15 +1,16 @@
 ---
 type: changelog
 description: Release history for the Landschaft landscape planning editor.
-last-updated: 2026-07-03
+last-updated: 2026-07-04
 last-model: codex-gpt-5
-last-change: add structures, boundaries, woodland, and building safe dataset options
+last-change: add DeepSeek-backed LCA analysis contract
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Added a versioned DeepSeek LCA prompt contract, response parser, MCP `lca_analyze` tool, HTTP `/lca/analyze` endpoint, and shared parser tests for Checkpoint 3.
 - Added Structures, Boundaries, Buildings, and a woodland mask derived from NLCD forest and shrub/scrub classes to the live provider import flow.
 - Rendered woodland, structures, buildings, and boundary fills as terrain-aware 3D overlays with stable 1:1 scale behavior and live boundary opacity updates.
 - Removed the FEMA flood hazard option from the safe dataset import flow.

@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "exports": {
     ".": {

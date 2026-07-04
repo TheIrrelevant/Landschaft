@@ -1,9 +1,9 @@
 /*
  * type: app-source
  * description: MCP server exposing Landschaft planning editor terrain and map tools.
- * last-updated: 2026-07-03
+ * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: add structures, boundaries, and woodland safe dataset ids
+ * last-change: expose DeepSeek-backed LCA analysis tool
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
@@ -14,6 +14,7 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { handleLcaAnalyze } from "./lcaTools.js";
 import { handleMapRead, handleMapWriteDraft } from "./mapTools.js";
 import {
   handleSafeDatasetImport,
@@ -154,6 +155,69 @@ server.tool(
               {
                 error:
                   error instanceof Error ? error.message : "map_write_draft failed."
+              },
+              null,
+              2
+            )
+          }
+        ],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "lca_analyze",
+  "Analyze selected map layers with DeepSeek and return a draft Landscape Character Assessment layer.",
+  {
+    projectId: z.string(),
+    selectedLayerIds: z.array(z.string()),
+    extentAreaId: z.string().optional(),
+    geometryDetail: z.enum(["summary", "simplified", "full"]).default("simplified"),
+    purpose: z.string(),
+    dryRun: z.boolean().default(false),
+    projectSnapshot: z.string().optional()
+  },
+  async ({
+    projectId,
+    selectedLayerIds,
+    extentAreaId,
+    geometryDetail,
+    purpose,
+    dryRun,
+    projectSnapshot
+  }) => {
+    try {
+      const result = await handleLcaAnalyze(
+        {
+          projectId,
+          selectedLayerIds,
+          extentAreaId,
+          geometryDetail,
+          purpose,
+          dryRun
+        },
+        projectSnapshot
+      );
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                error:
+                  error instanceof Error ? error.message : "lca_analyze failed."
               },
               null,
               2
@@ -354,6 +418,26 @@ function startHttpBridge() {
         return;
       }
 
+      if (request.method === "POST" && url.pathname === "/lca/analyze") {
+        const body = await readJsonBody(request);
+        sendJson(
+          response,
+          await handleLcaAnalyze(
+            {
+              projectId: String(body.projectId ?? ""),
+              selectedLayerIds: parseStringArray(body.selectedLayerIds),
+              extentAreaId:
+                typeof body.extentAreaId === "string" ? body.extentAreaId : undefined,
+              geometryDetail: parseGeometryDetail(body.geometryDetail),
+              purpose: String(body.purpose ?? ""),
+              dryRun: body.dryRun === true
+            },
+            body.projectSnapshot
+          )
+        );
+        return;
+      }
+
       sendJson(response, { error: "Not found." }, 404);
     } catch (error) {
       sendJson(
@@ -413,4 +497,14 @@ function readJsonBody(request: IncomingMessage) {
 function parseDatasetIds(value: unknown) {
   const result = z.array(SafeDatasetIdSchema).safeParse(value);
   return result.success ? result.data : undefined;
+}
+
+function parseStringArray(value: unknown) {
+  const result = z.array(z.string()).safeParse(value);
+  return result.success ? result.data : [];
+}
+
+function parseGeometryDetail(value: unknown) {
+  const result = z.enum(["summary", "simplified", "full"]).safeParse(value);
+  return result.success ? result.data : "simplified";
 }

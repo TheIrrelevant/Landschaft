@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Three.js terrain preview scene for the Landschaft editor.
- * last-updated: 2026-07-01
+ * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: cap one-to-one render scale for browser stability
+ * last-change: keep orthophoto visible below woodland mask layer
  * ---end-metadata---
  */
 import {
@@ -1519,8 +1519,16 @@ function isFullyOpaqueLayer(layer: PlanningLayer) {
   return layer.opacity >= FULL_LAYER_OPACITY;
 }
 
+function canSuppressLowerRasterLayers(layer: PlanningLayer) {
+  return layer.id !== "safe-data-woodland";
+}
+
 function isFullCoverageLayer(layer: PlanningLayer, terrainGenerated: boolean) {
   if (!layer.visible || layer.geometryType !== "raster" || !layer.rasterPreviewUrl) {
+    return false;
+  }
+
+  if (!canSuppressLowerRasterLayers(layer)) {
     return false;
   }
 

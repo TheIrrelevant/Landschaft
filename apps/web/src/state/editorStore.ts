@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: align safe dataset layer order and opacity defaults
+ * last-change: ignore stale local snapshots in static demo mode
  * ---end-metadata---
  */
 import {
@@ -781,6 +781,11 @@ function loadProjectSnapshot(): ProjectSnapshot | null {
     return null;
   }
 
+  if (staticSafeDatasetUrl) {
+    window.localStorage.removeItem(PROJECT_SNAPSHOT_STORAGE_KEY);
+    return null;
+  }
+
   const rawSnapshot = window.localStorage.getItem(PROJECT_SNAPSHOT_STORAGE_KEY);
   if (!rawSnapshot) {
     return null;
@@ -797,6 +802,10 @@ function loadProjectSnapshot(): ProjectSnapshot | null {
 
 function saveProjectSnapshot(snapshot: ProjectSnapshot) {
   if (typeof window === "undefined") {
+    return;
+  }
+
+  if (staticSafeDatasetUrl) {
     return;
   }
 

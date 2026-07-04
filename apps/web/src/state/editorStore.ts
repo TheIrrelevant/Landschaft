@@ -4,7 +4,7 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: restore static safe dataset demo loading
+ * last-change: align safe dataset layer order and opacity defaults
  * ---end-metadata---
  */
 import {
@@ -259,17 +259,16 @@ const safeDatasetLocations: SafeDatasetLocation[] = [
     targetCrs: "EPSG:26913",
     dataSource: "USGS The National Map / NAIP / USDA NRCS",
     datasets: [
-      "naip-ortho",
-      "dem-3dep",
-      "usgs-contours",
       "hydrography",
       "transportation",
-      "soil",
       "land-cover",
       "structures",
       "buildings",
-      "boundaries",
-      "woodland"
+      "woodland",
+      "soil",
+      "usgs-contours",
+      "dem-3dep",
+      "naip-ortho"
     ]
   }
 ];
@@ -747,13 +746,19 @@ function isSafeDatasetRaster(datasetId: SafeDatasetId) {
 }
 
 function getDefaultSafeDatasetOpacity(datasetId: SafeDatasetId) {
+  if (datasetId === "dem-3dep") {
+    return 0.5;
+  }
   if (datasetId === "land-cover") {
-    return 0.72;
+    return 0.4;
+  }
+  if (datasetId === "soil") {
+    return 0.4;
   }
   if (datasetId === "woodland") {
-    return 0.68;
+    return 1;
   }
-  return isSafeDatasetRaster(datasetId) ? 1 : 0.68;
+  return 1;
 }
 
 function createTerrainRequest(

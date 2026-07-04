@@ -4,7 +4,7 @@
  * description: MCP handlers for USA safe-location dataset discovery and import.
  * last-updated: 2026-07-03
  * last-model: codex-gpt-5
- * last-change: add structures, boundaries, and woodland safe dataset imports
+ * last-change: align safe dataset layer order and opacity defaults
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -248,17 +248,16 @@ const safeDatasetLocations: SafeDatasetLocation[] = [
     targetCrs: "EPSG:26913",
     dataSource: "USGS The National Map / NAIP / USDA NRCS",
     datasets: [
-      "naip-ortho",
-      "dem-3dep",
-      "usgs-contours",
       "hydrography",
       "transportation",
-      "soil",
       "land-cover",
       "structures",
       "buildings",
-      "boundaries",
-      "woodland"
+      "woodland",
+      "soil",
+      "usgs-contours",
+      "dem-3dep",
+      "naip-ortho"
     ]
   }
 ];
@@ -1026,7 +1025,7 @@ function createContourLayer(
     name: datasetLabels["usgs-contours"],
     kind: "foundational-map",
     visible: true,
-    opacity: 0.72,
+    opacity: 1,
     reviewStatus: "draft",
     category: "geomorphology",
     geometryType: "line",
@@ -1060,7 +1059,7 @@ function createHydrographyLayer(
     name: datasetLabels.hydrography,
     kind: "foundational-map",
     visible: true,
-    opacity: 0.88,
+    opacity: 1,
     reviewStatus: "draft",
     category: "hydrology",
     geometryType: "mixed",
@@ -1097,7 +1096,7 @@ function createTransportationLayer(
     name: datasetLabels.transportation,
     kind: "foundational-map",
     visible: true,
-    opacity: 0.84,
+    opacity: 1,
     reviewStatus: "draft",
     category: "infrastructure-utilities",
     geometryType: "line",
@@ -1141,7 +1140,7 @@ function createSoilLayer(
     name: datasetLabels.soil,
     kind: "foundational-map",
     visible: true,
-    opacity: 0.58,
+    opacity: 0.4,
     reviewStatus: "draft",
     category: "soil",
     geometryType: "polygon",
@@ -1186,7 +1185,7 @@ function createStructuresLayer(
     name: datasetLabels.structures,
     kind: "foundational-map",
     visible: true,
-    opacity: 0.82,
+    opacity: 1,
     reviewStatus: "draft",
     category: "infrastructure-utilities",
     geometryType: "point",
@@ -2112,13 +2111,16 @@ function isRasterDataset(datasetId: SafeDatasetId) {
 }
 
 function getDefaultProviderLayerOpacity(datasetId: SafeDatasetId) {
-  if (datasetId === "land-cover") {
-    return 0.72;
-  }
-  if (datasetId === "woodland") {
+  if (datasetId === "dem-3dep") {
     return 0.5;
   }
-  return isRasterDataset(datasetId) ? 1 : 0.68;
+  if (datasetId === "land-cover") {
+    return 0.4;
+  }
+  if (datasetId === "woodland") {
+    return 1;
+  }
+  return 1;
 }
 
 function safeRatio(numerator: number, denominator: number) {

@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-04
 last-model: codex-gpt-5
-last-change: restore static demo orthophoto loading
+last-change: align demo layer order and opacity defaults
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Aligned the safe dataset demo layer stack order and default opacities with the requested map-reading sequence.
 - Restored static safe dataset loading in the web editor so the GitHub Pages demo imports bundled orthophoto and raster assets without a live MCP backend.
 - Updated the demo branch GitHub Pages workflow to current Pages action versions for runner compatibility.
 - Refreshed the bundled Boulder Flatirons static demo payload with Structures, Boundaries, Buildings, and Woodland layers plus persisted raster assets for the `demo` branch.

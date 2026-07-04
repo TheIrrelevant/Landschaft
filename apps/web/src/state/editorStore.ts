@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Zustand store for Landschaft editor layers and selected area state.
- * last-updated: 2026-07-03
+ * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: add structures, boundaries, and woodland safe dataset options
+ * last-change: call MCP LCA analysis before local mock fallback
  * ---end-metadata---
  */
 import {
@@ -17,6 +17,7 @@ import {
   generateTerrainProjectAsync,
   ProjectSnapshotSchema,
   type CodedArea,
+  type LcaDraftAnalysisResult,
   type OrthophotoCorner,
   type PlanningLayer,
   type ProjectMetadata,
@@ -80,6 +81,12 @@ interface SafeDatasetBackendImportResult {
     bytes: number;
   }[];
   status: "imported";
+}
+
+interface LcaBackendAnalysisResult {
+  status: "analysis-ready";
+  analysis: LcaDraftAnalysisResult;
+  layer: PlanningLayer;
 }
 
 type EditorPersistedState = Pick<
@@ -1441,25 +1448,42 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         throw new Error("Select at least one input layer for LCA analysis.");
       }
 
-      const evidence = buildMapEvidence(
-        { project: state.project, layers: state.layers },
-        {
-          projectId: state.project.id,
+      let fallbackMessage: string | null = null;
+      let layer: PlanningLayer;
+
+      try {
+        const result = await fetchLcaAnalysis(
+          state.project.id,
           selectedLayerIds,
-          geometryDetail: "simplified"
-        }
-      );
-      const analysis = generateMockLcaDraft({
-        purpose: state.lcaPurpose,
-        evidence
-      });
-      const layer = createLcaLayerFromDraft(state.project, analysis.areas, analysis);
+          state.lcaPurpose,
+          toProjectSnapshot(state)
+        );
+        layer = result.layer;
+      } catch (backendError) {
+        const evidence = buildMapEvidence(
+          { project: state.project, layers: state.layers },
+          {
+            projectId: state.project.id,
+            selectedLayerIds,
+            geometryDetail: "simplified"
+          }
+        );
+        const analysis = generateMockLcaDraft({
+          purpose: state.lcaPurpose,
+          evidence
+        });
+        layer = createLcaLayerFromDraft(state.project, analysis.areas, analysis);
+        fallbackMessage = `MCP LCA backend unavailable; generated a local mock draft. ${
+          backendError instanceof Error ? backendError.message : "Unknown backend error."
+        }`;
+      }
+
       const layers = insertOrReplaceLayer(state.layers, layer);
       const nextState = {
         activeMode: "top-view" as const,
         layers,
         lcaAnalyzing: false,
-        lcaAnalysisError: null,
+        lcaAnalysisError: fallbackMessage,
         lcaSelectedLayerIds: selectedLayerIds,
         selectedLayerId: layer.id,
         selectedFeatureId: layer.features?.[0]?.id ?? null,
@@ -1794,6 +1818,48 @@ async function fetchSafeDatasetImport(
   }
 
   return (await response.json()) as SafeDatasetBackendImportResult;
+}
+
+async function fetchLcaAnalysis(
+  projectId: string,
+  selectedLayerIds: string[],
+  purpose: string,
+  projectSnapshot: ProjectSnapshot
+): Promise<LcaBackendAnalysisResult> {
+  let response: Response;
+
+  try {
+    response = await fetch(`${safeDatasetBridgeUrl}/lca/analyze`, {
+      body: JSON.stringify({
+        projectId,
+        selectedLayerIds,
+        geometryDetail: "simplified",
+        purpose,
+        projectSnapshot
+      }),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "POST"
+    });
+  } catch (error) {
+    throw new Error(
+      `LCA backend is unavailable at ${safeDatasetBridgeUrl}. Start the MCP server with npm run dev:mcp or set VITE_LANDSCHAFT_MCP_HTTP_URL.`,
+      { cause: error }
+    );
+  }
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    throw new Error(
+      payload?.error ??
+        "LCA backend is unavailable. Start the MCP server with npm run dev:mcp."
+    );
+  }
+
+  return (await response.json()) as LcaBackendAnalysisResult;
 }
 
 function summarizeSafeDatasetImport(result: SafeDatasetBackendImportResult) {

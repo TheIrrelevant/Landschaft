@@ -3,7 +3,7 @@ type: roadmap
 description: Product roadmap for the Landschaft web-based landscape planning editor.
 last-updated: 2026-07-04
 last-model: codex-gpt-5
-last-change: start DeepSeek-backed LCA analysis contract
+last-change: connect web LCA action to backend analysis
 ---
 
 # Landschaft Roadmap
@@ -1692,10 +1692,10 @@ Implemented so far:
 - LCA layers render in top-view and over the 3D terrain with project-extent clipping.
 - MCP `map_read` and `map_write_draft` now use the shared evidence and draft-write contracts with optional `projectSnapshot` input.
 - Shared LCA analysis now has a versioned DeepSeek prompt contract, JSON response parser, parser tests, MCP `lca_analyze` tool, and HTTP `/lca/analyze` endpoint with dry-run prompt inspection.
+- The web editor draft LCA action now calls the MCP `/lca/analyze` endpoint with the current project snapshot and selected evidence layers, then falls back to the local mock draft generator when the backend is unavailable.
 
 Next remaining work:
 
-- Wire the web editor LCA action to the hosted MCP `/lca/analyze` endpoint and use DeepSeek results instead of the local mock generator when backend analysis is available.
 - Add knowledge bank code anatomy generation and evidence citation UI.
 - Add explicit LCA analysis mode and richer spatial relationship inference.
 

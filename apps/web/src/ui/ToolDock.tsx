@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Bottom-center canvas tool dock for map imports, vector drawing, and draft LCA actions.
- * last-updated: 2026-06-29
+ * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: avoid stack overflow while rendering GeoTIFF previews
+ * last-change: show LCA backend fallback status
  * ---end-metadata---
  */
 import { Map, MapPin, Pentagon, Route, Shapes, Sparkles } from "lucide-react";
@@ -21,6 +21,7 @@ export function ToolDock() {
     importRasterOverlay,
     layers,
     lcaAnalyzing,
+    lcaAnalysisError,
     project,
     runLcaDraftAnalysis,
     terrainGenerated
@@ -94,6 +95,7 @@ export function ToolDock() {
         className="tool-dock-button"
         disabled={!terrainGenerated || !hasLcaInputs || lcaAnalyzing}
         onClick={() => {
+          setToolError(null);
           runLcaDraftAnalysis().catch((error: unknown) => {
             setToolError(
               error instanceof Error ? error.message : "LCA analysis failed."
@@ -106,7 +108,9 @@ export function ToolDock() {
         <Sparkles size={18} strokeWidth={1.75} />
       </button>
 
-      {toolError ? <p className="tool-dock-error">{toolError}</p> : null}
+      {toolError || lcaAnalysisError ? (
+        <p className="tool-dock-error">{toolError ?? lcaAnalysisError}</p>
+      ) : null}
 
       <input
         accept=".geojson,.json,.kml,application/geo+json,application/json,application/vnd.google-earth.kml+xml"

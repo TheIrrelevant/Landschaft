@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Zustand store for Landschaft editor layers and selected area state.
- * last-updated: 2026-07-03
+ * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: add structures, boundaries, and woodland safe dataset options
+ * last-change: restore static safe dataset demo loading
  * ---end-metadata---
  */
 import {
@@ -51,8 +51,10 @@ type SafeDatasetId =
   | "boundaries"
   | "woodland";
 type SafeDatasetImportStatus = "idle" | "ready" | "importing" | "complete" | "error";
+const staticSafeDatasetUrl = import.meta.env.VITE_LANDSCHAFT_STATIC_SAFE_DATA_URL;
+const configuredSafeDatasetBridgeUrl = import.meta.env.VITE_LANDSCHAFT_MCP_HTTP_URL;
 const safeDatasetBridgeUrl =
-  import.meta.env.VITE_LANDSCHAFT_MCP_HTTP_URL ?? "http://127.0.0.1:8787";
+  configuredSafeDatasetBridgeUrl ?? (import.meta.env.DEV ? "http://127.0.0.1:8787" : "");
 
 interface SafeDatasetLocation {
   id: string;
@@ -1674,7 +1676,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
 
     try {
-      const result = await fetchSafeDatasetImport(location.id, datasetIds);
+      const result = normalizeSafeDatasetImportResult(
+        await fetchSafeDatasetImport(location.id, datasetIds)
+      );
       const layers = result.layers;
       const nextState = {
         activeMode: "terrain-3d" as const,
@@ -1764,6 +1768,16 @@ async function fetchSafeDatasetImport(
 ): Promise<SafeDatasetBackendImportResult> {
   let response: Response;
 
+  if (staticSafeDatasetUrl) {
+    return fetchStaticSafeDatasetImport(staticSafeDatasetUrl);
+  }
+
+  if (!safeDatasetBridgeUrl) {
+    throw new Error(
+      "Safe dataset backend URL is not configured for this deployment. Set VITE_LANDSCHAFT_MCP_HTTP_URL to the hosted Landschaft MCP HTTP bridge URL."
+    );
+  }
+
   try {
     response = await fetch(`${safeDatasetBridgeUrl}/safe-dataset/import`, {
       body: JSON.stringify({
@@ -1778,7 +1792,7 @@ async function fetchSafeDatasetImport(
     });
   } catch (error) {
     throw new Error(
-      `Safe dataset backend is unavailable at ${safeDatasetBridgeUrl}. Start the MCP server with npm run dev:mcp or set VITE_LANDSCHAFT_MCP_HTTP_URL.`,
+      `Safe dataset backend is unavailable at ${safeDatasetBridgeUrl}. Start the MCP server with npm run dev:mcp for local development or set VITE_LANDSCHAFT_MCP_HTTP_URL to a hosted backend URL.`,
       { cause: error }
     );
   }
@@ -1794,6 +1808,45 @@ async function fetchSafeDatasetImport(
   }
 
   return (await response.json()) as SafeDatasetBackendImportResult;
+}
+
+async function fetchStaticSafeDatasetImport(
+  url: string
+): Promise<SafeDatasetBackendImportResult> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Static safe dataset demo could not be loaded from ${url}.`);
+  }
+
+  return (await response.json()) as SafeDatasetBackendImportResult;
+}
+
+function normalizeSafeDatasetImportResult(
+  result: SafeDatasetBackendImportResult
+): SafeDatasetBackendImportResult {
+  return {
+    ...result,
+    layers: result.layers.map(normalizeSafeDatasetLayer)
+  };
+}
+
+function normalizeSafeDatasetLayer(layer: PlanningLayer): PlanningLayer {
+  if (!layer.rasterPreviewUrl?.startsWith("/")) {
+    return layer;
+  }
+
+  return {
+    ...layer,
+    rasterPreviewUrl: `${getRasterPreviewBaseUrl()}${layer.rasterPreviewUrl}`
+  };
+}
+
+function getRasterPreviewBaseUrl() {
+  if (staticSafeDatasetUrl) {
+    return import.meta.env.BASE_URL.replace(/\/$/, "");
+  }
+
+  return safeDatasetBridgeUrl.replace(/\/$/, "");
 }
 
 function summarizeSafeDatasetImport(result: SafeDatasetBackendImportResult) {

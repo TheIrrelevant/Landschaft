@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-04
 last-model: codex-gpt-5
-last-change: update Pages deployment actions for demo branch
+last-change: restore static demo orthophoto loading
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Restored static safe dataset loading in the web editor so the GitHub Pages demo imports bundled orthophoto and raster assets without a live MCP backend.
 - Updated the demo branch GitHub Pages workflow to current Pages action versions for runner compatibility.
 - Refreshed the bundled Boulder Flatirons static demo payload with Structures, Boundaries, Buildings, and Woodland layers plus persisted raster assets for the `demo` branch.
 - Added Structures, Boundaries, Buildings, and a woodland mask derived from NLCD forest and shrub/scrub classes to the live provider import flow.

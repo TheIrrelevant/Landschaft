@@ -4,13 +4,14 @@
  * description: Tests for Landschaft LCA prompt and DeepSeek response parsing.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: cover DeepSeek LCA prompt and response parsing contract
+ * last-change: cover LCA code anatomy and citation metadata
  * ---end-metadata---
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildDeepSeekLcaPrompt,
+  createLcaLayerFromDraft,
   LCA_DEEPSEEK_MODEL,
   LCA_DEEPSEEK_PROMPT_VERSION,
   parseDeepSeekLcaDraftResponse,
@@ -80,6 +81,70 @@ describe("buildDeepSeekLcaPrompt", () => {
     assert.equal(prompt.responseFormat, "json_object");
     assert.equal(user.purpose, request.purpose);
     assert.deepEqual(user.selectedLayerIds, request.evidence.selectedLayerIds);
+  });
+});
+
+describe("createLcaLayerFromDraft", () => {
+  it("stores parseable code anatomy and evidence citations on generated features", () => {
+    const layer = createLcaLayerFromDraft(
+      {
+        id: "project-demo",
+        name: "Demo",
+        coordinateReferenceSystem: "EPSG:4326",
+        corners: [
+          { label: "NW", latitude: 0, longitude: 0 },
+          { label: "NE", latitude: 0, longitude: 1 },
+          { label: "SE", latitude: -1, longitude: 1 },
+          { label: "SW", latitude: -1, longitude: 0 }
+        ],
+        realWorldExtentMeters: {
+          width: 100,
+          depth: 80
+        }
+      },
+      [
+        {
+          id: "area-a",
+          label: "Loam terrace",
+          ring: [
+            [0, 0],
+            [100, 0],
+            [100, 80],
+            [0, 80],
+            [0, 0]
+          ],
+          layer: "lca",
+          code: "LO-WD",
+          meaning: "Evidence: soil loam and woodland edge.",
+          confidence: 0.82
+        }
+      ],
+      {
+        model: "deepseek-reasoner",
+        promptVersion: "lca-deepseek-v1",
+        inputLayerIds: ["soil", "woodland"]
+      }
+    );
+    const attributes = layer.features?.[0]?.attributes;
+
+    assert.equal(attributes?.knowledgeBankVersion, "lca-kb-mvp-v1");
+    const codeAnatomy = JSON.parse(attributes?.codeAnatomy ?? "[]") as {
+      segment: string;
+      sourceLayerId: string;
+    }[];
+    const evidenceCitations = JSON.parse(
+      attributes?.evidenceCitations ?? "[]"
+    ) as { sourceLayerId: string; excerpt: string }[];
+
+    assert.deepEqual(
+      codeAnatomy.map((segment) => segment.segment),
+      ["LO", "WD"]
+    );
+    assert.deepEqual(
+      evidenceCitations.map((citation) => citation.sourceLayerId),
+      ["soil", "woodland"]
+    );
+    assert.match(evidenceCitations[0]?.excerpt ?? "", /soil loam/);
   });
 });
 

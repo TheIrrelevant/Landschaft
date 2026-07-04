@@ -4,7 +4,7 @@
  * description: Landscape Character Assessment draft generation and layer mapping for Landschaft.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: add DeepSeek LCA prompt contract and response parser
+ * last-change: add LCA code anatomy and evidence citation metadata
  * ---end-metadata---
  */
 import type {
@@ -39,6 +39,28 @@ export interface DeepSeekLcaPrompt {
   temperature: number;
 }
 
+export interface LcaCodeAnatomySegment {
+  segment: string;
+  position: number;
+  theme: string;
+  sourceLayerId: string;
+  sourceAttribute: string;
+  sourceValue: string;
+  meaning: string;
+  classificationRule: string;
+  confidence: number;
+  version: string;
+}
+
+export interface LcaEvidenceCitation {
+  id: string;
+  sourceLayerId: string;
+  sourceFeatureId?: string;
+  label: string;
+  excerpt: string;
+  confidence: number;
+}
+
 export interface MapWriteDraftResult {
   status: "draft-written";
   projectId: string;
@@ -53,6 +75,15 @@ const LCA_LAYER_ID = "landscape-character-assessment";
 const LCA_PROMPT_VERSION = "lca-mvp-v1";
 export const LCA_DEEPSEEK_MODEL = "deepseek-reasoner";
 export const LCA_DEEPSEEK_PROMPT_VERSION = "lca-deepseek-v1";
+const LCA_KNOWLEDGE_BANK_VERSION = "lca-kb-mvp-v1";
+const LCA_CODE_THEMES = [
+  "topography",
+  "slope",
+  "geology",
+  "soil",
+  "vegetation",
+  "land-use"
+] as const;
 
 export function generateLcaCodedId() {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -310,6 +341,9 @@ function codedAreaToVectorFeature(
   area: CodedArea,
   analysis: Pick<LcaDraftAnalysisResult, "model" | "promptVersion" | "inputLayerIds">
 ): VectorFeature {
+  const codeAnatomy = buildCodeAnatomy(area, analysis.inputLayerIds);
+  const evidenceCitations = buildEvidenceCitations(area, analysis.inputLayerIds);
+
   return {
     id: area.id,
     label: area.label,
@@ -323,6 +357,9 @@ function codedAreaToVectorFeature(
       model: analysis.model,
       promptVersion: analysis.promptVersion,
       inputLayerIds: analysis.inputLayerIds.join(","),
+      knowledgeBankVersion: LCA_KNOWLEDGE_BANK_VERSION,
+      codeAnatomy: JSON.stringify(codeAnatomy),
+      evidenceCitations: JSON.stringify(evidenceCitations),
       meaning: area.meaning
     },
     planningImpact:
@@ -340,6 +377,77 @@ function validateCodedArea(area: CodedArea): CodedArea {
     ring: closeRing(area.ring),
     confidence: clampConfidence(area.confidence)
   };
+}
+
+function buildCodeAnatomy(
+  area: CodedArea,
+  inputLayerIds: string[]
+): LcaCodeAnatomySegment[] {
+  const segments = splitCharacterCode(area.code);
+  const sourceLayerIds = inputLayerIds.length ? inputLayerIds : ["derived-lca"];
+
+  return segments.map((segment, index) => {
+    const theme = LCA_CODE_THEMES[index % LCA_CODE_THEMES.length];
+    const sourceLayerId = sourceLayerIds[index % sourceLayerIds.length];
+
+    return {
+      segment,
+      position: index + 1,
+      theme,
+      sourceLayerId,
+      sourceAttribute: theme,
+      sourceValue: segment,
+      meaning: `${segment} is a draft ${formatTheme(theme)} code segment for ${area.label}.`,
+      classificationRule:
+        "Draft MVP mapping assembled from selected LCA evidence and pending knowledge-bank review.",
+      confidence: area.confidence,
+      version: LCA_KNOWLEDGE_BANK_VERSION
+    };
+  });
+}
+
+function buildEvidenceCitations(
+  area: CodedArea,
+  inputLayerIds: string[]
+): LcaEvidenceCitation[] {
+  const sourceLayerIds = inputLayerIds.length ? inputLayerIds : ["derived-lca"];
+
+  return sourceLayerIds.map((sourceLayerId, index) => ({
+    id: `${area.id}-evidence-${index + 1}`,
+    sourceLayerId,
+    label: `Evidence layer ${sourceLayerId}`,
+    excerpt: area.meaning,
+    confidence: area.confidence
+  }));
+}
+
+function splitCharacterCode(code: string) {
+  const normalized = code.trim().replace(/[^a-zA-Z0-9-]/g, "");
+  if (!normalized) {
+    return ["LCA"];
+  }
+
+  const delimited = normalized.split("-").filter(Boolean);
+  if (delimited.length > 1) {
+    return delimited.map((segment) => segment.toUpperCase());
+  }
+
+  const chunks = normalized.match(/[a-zA-Z]+|\d+/g) ?? [normalized];
+  return chunks.flatMap((chunk) => {
+    if (chunk.length <= 3) {
+      return chunk.toUpperCase();
+    }
+
+    const result: string[] = [];
+    for (let index = 0; index < chunk.length; index += 2) {
+      result.push(chunk.slice(index, index + 2).toUpperCase());
+    }
+    return result;
+  });
+}
+
+function formatTheme(theme: string) {
+  return theme.replace("-", " ");
 }
 
 function deriveCharacterCode(attributes: Record<string, string>) {

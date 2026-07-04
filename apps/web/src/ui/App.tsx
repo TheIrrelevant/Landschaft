@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-source
  * description: Main Landschaft editor shell.
- * last-updated: 2026-06-29
+ * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: move map import drawing and LCA actions into the canvas tool dock
+ * last-change: show LCA code anatomy and evidence citations in inspector
  * ---end-metadata---
  */
 import {
@@ -143,6 +143,19 @@ function LayerInspector() {
       ) * 0.025
     )
   );
+  const lcaCodeAnatomy =
+    selectedLayer?.kind === "lca" && selectedFeature
+      ? parseLcaCodeAnatomy(selectedFeature.attributes.codeAnatomy)
+      : [];
+  const lcaEvidenceCitations =
+    selectedLayer?.kind === "lca" && selectedFeature
+      ? parseLcaEvidenceCitations(selectedFeature.attributes.evidenceCitations)
+      : [];
+  const visibleFeatureAttributes = selectedFeature
+    ? Object.entries(selectedFeature.attributes).filter(
+        ([key]) => !hiddenLcaAttributeKeys.has(key)
+      )
+    : [];
 
   if (!inspectorOpen || !selectedLayer) {
     return null;
@@ -322,13 +335,47 @@ function LayerInspector() {
                 </button>
               ))}
             </div>
-            {Object.entries(selectedFeature.attributes).map(([key, value]) => (
+            {visibleFeatureAttributes.map(([key, value]) => (
               <div key={key}>
                 <dt>{formatLabel(key)}</dt>
                 <dd>{value}</dd>
               </div>
             ))}
           </dl>
+          {lcaCodeAnatomy.length ? (
+            <section className="lca-evidence-section">
+              <h3>Code Anatomy</h3>
+              <div className="lca-anatomy-list">
+                {lcaCodeAnatomy.map((segment) => (
+                  <article
+                    className="lca-anatomy-item"
+                    key={`${selectedFeature.id}-code-${segment.position}-${segment.segment}`}
+                  >
+                    <strong>{segment.segment}</strong>
+                    <span>{formatLabel(segment.theme)}</span>
+                    <p>{segment.meaning}</p>
+                    <small>
+                      {segment.sourceLayerId} / {Math.round(segment.confidence * 100)}%
+                    </small>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+          {lcaEvidenceCitations.length ? (
+            <section className="lca-evidence-section">
+              <h3>Evidence Citations</h3>
+              <ul className="lca-citation-list">
+                {lcaEvidenceCitations.map((citation) => (
+                  <li key={citation.id}>
+                    <strong>{citation.label}</strong>
+                    <span>{citation.sourceLayerId}</span>
+                    <p>{citation.excerpt}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           {!selectedLayer.locked ? (
             <>
               {selectedVertexIndex !== null ? (
@@ -456,4 +503,88 @@ function formatLabel(value: string) {
     .split("-")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+interface InspectorCodeSegment {
+  segment: string;
+  position: number;
+  theme: string;
+  sourceLayerId: string;
+  meaning: string;
+  confidence: number;
+}
+
+interface InspectorEvidenceCitation {
+  id: string;
+  sourceLayerId: string;
+  label: string;
+  excerpt: string;
+}
+
+const hiddenLcaAttributeKeys = new Set([
+  "codeAnatomy",
+  "evidenceCitations"
+]);
+
+function parseLcaCodeAnatomy(value?: string): InspectorCodeSegment[] {
+  const parsed = parseJsonArray(value);
+  return parsed.flatMap((item, index) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+
+    return [
+      {
+        segment: getString(item.segment, "LCA"),
+        position: getNumber(item.position, index + 1),
+        theme: getString(item.theme, "landscape-character"),
+        sourceLayerId: getString(item.sourceLayerId, "derived-lca"),
+        meaning: getString(item.meaning, "Draft knowledge-bank segment."),
+        confidence: getNumber(item.confidence, 0.5)
+      }
+    ];
+  });
+}
+
+function parseLcaEvidenceCitations(value?: string): InspectorEvidenceCitation[] {
+  const parsed = parseJsonArray(value);
+  return parsed.flatMap((item, index) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+
+    return [
+      {
+        id: getString(item.id, `citation-${index + 1}`),
+        sourceLayerId: getString(item.sourceLayerId, "derived-lca"),
+        label: getString(item.label, `Evidence ${index + 1}`),
+        excerpt: getString(item.excerpt, "No evidence excerpt stored.")
+      }
+    ];
+  });
+}
+
+function parseJsonArray(value?: string): unknown[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function getString(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function getNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

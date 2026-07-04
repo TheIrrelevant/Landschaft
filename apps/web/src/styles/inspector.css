@@ -2,9 +2,9 @@
  * ---metadata---
  * type: app-style
  * description: Inspector drawer styles for the Landschaft editor.
- * last-updated: 2026-06-28
+ * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: style selected feature move controls
+ * last-change: style LCA code anatomy and citation panels
  * ---end-metadata---
  */
 .inspector-drawer {
@@ -207,6 +207,63 @@
   font-size: 12.5px;
   line-height: 1.45;
   margin: 0;
+}
+
+.lca-evidence-section {
+  display: grid;
+  gap: 8px;
+}
+
+.lca-evidence-section h3 {
+  color: var(--color-text-primary);
+  font-size: 12.5px;
+  font-weight: var(--font-weight-medium);
+  margin: 0;
+}
+
+.lca-anatomy-list,
+.lca-citation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.lca-anatomy-item,
+.lca-citation-list li {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+}
+
+.lca-citation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.lca-anatomy-item strong,
+.lca-citation-list strong {
+  color: var(--color-text-primary);
+  font-size: 12.5px;
+  font-weight: var(--font-weight-medium);
+}
+
+.lca-anatomy-item span,
+.lca-citation-list span,
+.lca-anatomy-item small {
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+}
+
+.lca-anatomy-item p,
+.lca-citation-list p {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .impact-list {

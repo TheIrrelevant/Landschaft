@@ -3,13 +3,14 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-04
 last-model: codex-gpt-5
-last-change: connect web LCA action to MCP analysis endpoint
+last-change: add LCA code anatomy and citation inspection
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Added draft LCA knowledge-bank code anatomy and evidence citation metadata to generated character features, with dedicated inspector panels for review.
 - Connected the web draft LCA action to the MCP `/lca/analyze` endpoint, using DeepSeek-backed backend results when available and preserving the local mock draft as a fallback.
 - Added a versioned DeepSeek LCA prompt contract, response parser, MCP `lca_analyze` tool, HTTP `/lca/analyze` endpoint, and shared parser tests for Checkpoint 3.
 - Added Structures, Boundaries, Buildings, and a woodland mask derived from NLCD forest and shrub/scrub classes to the live provider import flow.

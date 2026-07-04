@@ -1319,6 +1319,8 @@ export {
   LCA_DEEPSEEK_PROMPT_VERSION,
   parseDeepSeekLcaDraftResponse,
   type DeepSeekLcaPrompt,
+  type LcaCodeAnatomySegment,
+  type LcaEvidenceCitation,
   type LcaDraftAnalysisRequest,
   type LcaDraftAnalysisResult,
   type MapWriteDraftResult

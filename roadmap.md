@@ -3,7 +3,7 @@ type: roadmap
 description: Product roadmap for the Landschaft web-based landscape planning editor.
 last-updated: 2026-07-04
 last-model: codex-gpt-5
-last-change: connect web LCA action to backend analysis
+last-change: add LCA code anatomy and citation inspection
 ---
 
 # Landschaft Roadmap
@@ -1693,10 +1693,11 @@ Implemented so far:
 - MCP `map_read` and `map_write_draft` now use the shared evidence and draft-write contracts with optional `projectSnapshot` input.
 - Shared LCA analysis now has a versioned DeepSeek prompt contract, JSON response parser, parser tests, MCP `lca_analyze` tool, and HTTP `/lca/analyze` endpoint with dry-run prompt inspection.
 - The web editor draft LCA action now calls the MCP `/lca/analyze` endpoint with the current project snapshot and selected evidence layers, then falls back to the local mock draft generator when the backend is unavailable.
+- Generated LCA features now store draft knowledge-bank code anatomy and evidence citation metadata, and the inspector displays both as dedicated review sections instead of raw JSON attributes.
 
 Next remaining work:
 
-- Add knowledge bank code anatomy generation and evidence citation UI.
+- Replace draft code-anatomy heuristics with true area/source-layer intersection and reusable knowledge-bank entries.
 - Add explicit LCA analysis mode and richer spatial relationship inference.
 
 ## 4. Forces For Change And Sensitivity Capacity Assessment

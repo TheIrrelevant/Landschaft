@@ -1,0 +1,13 @@
+# type: dockerignore
+# description: Docker build exclusions for Landschaft deployment images.
+# last-updated: 2026-07-02
+# last-model: codex-gpt-5
+# last-change: add MCP backend container exclusions
+.git
+.github
+node_modules
+apps/*/dist
+packages/*/dist
+apps/web/public/provider-assets
+npm-debug.log
+.DS_Store

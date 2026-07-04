@@ -12,7 +12,8 @@
     "dev": "npm run dev -w @landschaft/web",
     "dev:web": "npm run dev -w @landschaft/web",
     "dev:mcp": "npm run dev -w @landschaft/mcp-server",
-    "build": "npm run build -ws",
+    "start:mcp": "npm run start -w @landschaft/mcp-server",
+    "build": "npm run build -w @landschaft/shared && npm run build -w @landschaft/mcp-server && npm run build -w @landschaft/web",
     "typecheck": "npm run typecheck -ws",
     "lint": "npm run lint -ws"
   },

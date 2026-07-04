@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/server.ts",
-    "build": "tsc -b",
+    "start": "node dist/server.js",
+    "build": "tsc -b --force",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --ext .ts"
   },

@@ -191,3 +191,50 @@ function buildSpatialRelationships(
 
   return relationships;
 }
+
+export interface CapMapEvidenceOptions {
+  maxFeaturesPerLayer?: number;
+  maxTotalFeatures?: number;
+  maxSpatialRelationships?: number;
+}
+
+export function capMapEvidenceForLca(
+  evidence: MapReadResult,
+  options: CapMapEvidenceOptions = {}
+): MapReadResult {
+  const maxFeaturesPerLayer = options.maxFeaturesPerLayer ?? 15;
+  const maxTotalFeatures = options.maxTotalFeatures ?? 80;
+  const maxSpatialRelationships = options.maxSpatialRelationships ?? 40;
+  const featuresByLayer = new Map<string, MapEvidenceFeature[]>();
+
+  for (const feature of evidence.features) {
+    const layerFeatures = featuresByLayer.get(feature.layerId) ?? [];
+    if (layerFeatures.length < maxFeaturesPerLayer) {
+      layerFeatures.push(feature);
+      featuresByLayer.set(feature.layerId, layerFeatures);
+    }
+  }
+
+  const features = Array.from(featuresByLayer.values())
+    .flat()
+    .slice(0, maxTotalFeatures);
+
+  const layerSummaries = evidence.layerSummaries.map((summary) => ({
+    ...summary,
+    planningNotes:
+      summary.featureCount > maxFeaturesPerLayer
+        ? [
+            ...summary.planningNotes,
+            `LCA prompt capped to ${maxFeaturesPerLayer} features from this layer.`
+          ]
+        : summary.planningNotes
+  }));
+
+  return {
+    ...evidence,
+    geometryDetail: "summary",
+    features,
+    layerSummaries,
+    spatialRelationships: evidence.spatialRelationships.slice(0, maxSpatialRelationships)
+  };
+}

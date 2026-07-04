@@ -1,0 +1,320 @@
+/*
+ * ---metadata---
+ * type: app-style
+ * description: Excel-like spreadsheet styles for the Landschaft knowledge-base overlay.
+ * last-updated: 2026-07-04
+ * last-model: composer-2.5
+ * last-change: restyle overlay as resizable spreadsheet with material swatch column
+ * ---end-metadata---
+ */
+
+.knowledge-base-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.knowledge-base-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: #1a1d24;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  color: #eef1f6;
+  overflow: hidden;
+}
+
+.knowledge-base-panel-sheet {
+  min-width: 720px;
+  min-height: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+}
+
+.knowledge-base-sheet-toolbar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #22262f;
+}
+
+.knowledge-base-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.knowledge-base-import,
+.knowledge-base-sync {
+  padding: 7px 12px;
+  border-radius: 6px;
+  color: #eef1f6;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.knowledge-base-import {
+  border: 1px solid rgba(120, 176, 255, 0.45);
+  background: rgba(74, 128, 220, 0.22);
+}
+
+.knowledge-base-sync {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.knowledge-base-import:hover:not(:disabled) {
+  background: rgba(74, 128, 220, 0.34);
+}
+
+.knowledge-base-sync:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.knowledge-base-import:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.knowledge-base-sheet-title {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(238, 241, 246, 0.88);
+}
+
+.knowledge-base-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  cursor: pointer;
+}
+
+.knowledge-base-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.knowledge-base-message {
+  margin: 0;
+  padding: 8px 12px 0;
+  font-size: 12px;
+  color: rgba(214, 222, 235, 0.82);
+}
+
+.knowledge-base-message-warning {
+  color: #f5c27a;
+}
+
+.knowledge-base-text-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+
+.knowledge-base-text-panel span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(238, 241, 246, 0.72);
+}
+
+.knowledge-base-text-summary {
+  width: 100%;
+  min-height: 88px;
+  max-height: 120px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.24);
+  color: rgba(238, 241, 246, 0.9);
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.knowledge-base-sheet-wrap {
+  flex: 1;
+  overflow: auto;
+  background: #d8d8d8;
+}
+
+.knowledge-base-sheet {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+  color: #1a1a1a;
+}
+
+.knowledge-base-sheet th,
+.knowledge-base-sheet td {
+  border: 1px solid #b8b8b8;
+  padding: 0;
+  vertical-align: middle;
+}
+
+.kb-corner {
+  position: sticky;
+  top: 0;
+  left: 52px;
+  z-index: 4;
+  width: 42px;
+  min-width: 42px;
+  background: #ececec;
+}
+
+.kb-material-header {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  width: 52px;
+  min-width: 52px;
+  background: #ececec;
+  color: #444;
+  font-weight: 600;
+}
+
+.kb-material-cell {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 52px;
+  min-width: 52px;
+  background: #fff;
+  text-align: center;
+}
+
+.kb-col-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 26px;
+  background: #ececec;
+  color: #444;
+  font-weight: 600;
+  text-align: center;
+  user-select: none;
+}
+
+.kb-row-header {
+  position: sticky;
+  left: 52px;
+  z-index: 2;
+  width: 42px;
+  min-width: 42px;
+  background: #ececec;
+  color: #444;
+  font-weight: 600;
+  text-align: center;
+  user-select: none;
+}
+
+.kb-col-resizer {
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.kb-col-header span,
+.kb-row-header span {
+  display: block;
+  line-height: 26px;
+}
+
+.kb-col-resizer,
+.kb-row-resizer {
+  position: absolute;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.kb-row-resizer {
+  left: 0;
+  bottom: -3px;
+  width: 100%;
+  height: 6px;
+  cursor: row-resize;
+}
+
+.kb-cell {
+  background: #fff;
+  height: 28px;
+  cursor: cell;
+}
+
+.kb-cell-active,
+.kb-cell-editing {
+  outline: 2px solid #217346;
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+.kb-cell-value,
+.kb-cell-input {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 4px 6px;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kb-cell-input {
+  border: 0;
+  outline: none;
+  background: #fff;
+  color: #1a1a1a;
+  font: inherit;
+}
+
+.kb-material-swatch {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #9a9a9a;
+}
+
+.knowledge-base-panel-resizer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.35) 50%);
+  cursor: nwse-resize;
+}
+
+.knowledge-base-file-input {
+  display: none;
+}
+
+.tool-dock-button-active {
+  border-color: rgba(120, 176, 255, 0.55);
+  background: rgba(74, 128, 220, 0.24);
+}

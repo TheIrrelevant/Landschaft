@@ -30,6 +30,8 @@ export interface KnowledgeBankEntry {
   status: KnowledgeBankEntryStatus;
   version: string;
   usageCount: number;
+  importSource?: string;
+  importedAt?: string;
 }
 
 export const LCA_KNOWLEDGE_BANK_VERSION = "lca-kb-v2";

@@ -3,13 +3,17 @@ type: changelog
 description: Release history for the Landschaft landscape planning editor.
 last-updated: 2026-07-04
 last-model: codex-gpt-5
-last-change: complete checkpoint 3 LCA workflow
+last-change: wire Swanwick constitution into DeepSeek LCA prompt
 ---
 
 # Changelog
 
 ## Unreleased
 
+- Paused Ollama Cloud LCA inference in the web UI until the integration is stable; the LCA panel remains for configuration only.
+- Fixed woodland layer rendering so tree markers no longer trigger a full-coverage gray raster plane that masked layers below.
+- Switched LCA inference to Ollama Cloud with a provider field, featured DeepSeek V4 Flash/Pro model chips, and a more-models picker backed by `/lca/models`.
+- Wired DeepSeek LCA analysis to load `Constitution/lca-swanwick.md` into the system prompt before map evidence is sent, and create a new LCA layer from the parsed response.
 - Completed Checkpoint 3 with polygon-intersecting evidence matching, dominant-value knowledge-bank code assembly, richer spatial relationship inference, and an explicit LCA analysis mode panel in the web editor.
 - Linked draft LCA code anatomy and evidence citations to selected source features whose project-metre bounds intersect each generated character area.
 - Added draft LCA knowledge-bank code anatomy and evidence citation metadata to generated character features, with dedicated inspector panels for review.

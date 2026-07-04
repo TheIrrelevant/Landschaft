@@ -4,7 +4,7 @@
  * description: Main Landschaft editor shell.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: mount explicit LCA analysis mode panel in sidebar
+ * last-change: disable inspector drawer side panel on selection
  * ---end-metadata---
  */
 import {
@@ -15,25 +15,28 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Copy,
-  SlidersHorizontal,
   Trash2,
   X
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TerrainScene } from "../scene/TerrainScene";
-import { useEditorStore } from "../state/editorStore";
+import { hydrateEditorPersistence, useEditorStore } from "../state/editorStore";
 import { LandschaftLogo } from "./LandschaftLogo";
 import { LcaAnalysisPanel } from "./LcaAnalysisPanel";
 import { LayersPanel } from "./LayersPanel";
 import { TerrainSetupPanel } from "./TerrainSetupPanel";
+import { KnowledgeBaseOverlay } from "./KnowledgeBaseOverlay";
 import { ToolDock } from "./ToolDock";
 import { UserPanel } from "./UserPanel";
 import { ViewportOverlay } from "./ViewportOverlay";
 
 export function App() {
-  const { activeMode, inspectorOpen, selectedLayerId, selectLayer, setMode } =
-    useEditorStore();
+  const { activeMode, setMode } = useEditorStore();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    void hydrateEditorPersistence();
+  }, []);
 
   return (
     <main className={`editor-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -81,29 +84,11 @@ export function App() {
           <TerrainScene />
           <ViewportOverlay />
           <ToolDock />
-          {!inspectorOpen ? (
-            <button
-              aria-controls="layer-inspector"
-              aria-expanded={false}
-              aria-label="Open inspector"
-              className="inspector-tab"
-              onClick={() => {
-                if (selectedLayerId) {
-                  selectLayer(selectedLayerId);
-                }
-              }}
-              type="button"
-            >
-              <span className="inspector-tab-icon" aria-hidden="true">
-                <SlidersHorizontal size={14} strokeWidth={1.75} />
-              </span>
-              <span className="inspector-tab-label">Inspector</span>
-            </button>
-          ) : null}
+          <KnowledgeBaseOverlay />
+
         </div>
       </section>
 
-      <LayerInspector />
     </main>
   );
 }

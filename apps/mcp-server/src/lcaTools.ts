@@ -1,27 +1,47 @@
 /*
  * ---metadata---
  * type: app-source
- * description: MCP handlers for DeepSeek-backed Landschaft LCA analysis.
+ * description: MCP handlers for Ollama-backed Landschaft LCA analysis.
  * last-updated: 2026-07-04
- * last-model: codex-gpt-5
- * last-change: pass explicit LCA analysis mode and output quality
+ * last-model: composer-2.5
+ * last-change: switch LCA inference to Ollama Cloud with selectable models
  * ---end-metadata---
  */
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   buildDeepSeekLcaPrompt,
   buildMapEvidence,
+  capMapEvidenceForLca,
   createLcaLayerFromDraft,
+  LCA_DEFAULT_OLLAMA_MODEL,
+  LCA_SWANWICK_CONSTITUTION_RELATIVE_PATH,
   parseDeepSeekLcaDraftResponse,
   ProjectSnapshotSchema,
   type MapReadRequest,
   type ProjectSnapshot
 } from "@landschaft/shared";
+import { listOllamaCloudModels, requestOllamaCloudLca } from "./ollamaLca.js";
+
 
 export interface LcaAnalyzeRequest extends MapReadRequest {
   purpose: string;
   analysisMode?: "desk-study" | "field-validation" | "classification";
   outputQuality?: "conceptual" | "professional" | "report-ready";
+  model?: string;
+  provider?: "ollama-cloud";
   dryRun?: boolean;
+}
+
+export async function handleLcaListModels() {
+  const models = await listOllamaCloudModels();
+  return {
+    status: "models-ready",
+    provider: "ollama-cloud",
+    models,
+    featuredModelIds: ["deepseek-v4-flash", "deepseek-v4-pro"]
+  };
 }
 
 export async function handleLcaAnalyze(
@@ -35,74 +55,66 @@ export async function handleLcaAnalyze(
     );
   }
 
-  const evidence = buildMapEvidence(
-    { project: snapshot.project, layers: snapshot.layers },
-    request
+  const model = request.model ?? LCA_DEFAULT_OLLAMA_MODEL;
+  const evidence = capMapEvidenceForLca(
+    buildMapEvidence(
+      { project: snapshot.project, layers: snapshot.layers },
+      {
+        ...request,
+        geometryDetail: request.geometryDetail ?? "summary"
+      }
+    )
   );
+  const constitution = loadLcaSwanwickConstitution();
   const prompt = buildDeepSeekLcaPrompt({
     purpose: request.purpose,
     evidence,
+    constitution,
     analysisMode: request.analysisMode,
-    outputQuality: request.outputQuality
+    outputQuality: request.outputQuality,
+    model,
+    provider: "ollama-cloud"
   });
+  const promptSizeKb = Math.round(
+    (prompt.system.length + prompt.constitution.length + prompt.user.length) / 1024
+  );
+  console.info(
+    `[lca] Prompt ~${promptSizeKb}KB with ${evidence.features.length} capped features for ${model}`
+  );
 
   if (request.dryRun) {
     return {
       status: "prompt-ready",
+      provider: "ollama-cloud",
+      model,
       prompt,
       evidence
     };
   }
 
-  const rawResponse = await requestDeepSeekLca(prompt);
+  const rawResponse = await requestOllamaCloudLca(prompt, model);
   const analysis = parseDeepSeekLcaDraftResponse(rawResponse, {
     purpose: request.purpose,
     evidence,
+    constitution,
     analysisMode: request.analysisMode,
-    outputQuality: request.outputQuality
+    outputQuality: request.outputQuality,
+    model,
+    provider: "ollama-cloud"
   });
-  const layer = createLcaLayerFromDraft(snapshot.project, analysis.areas, analysis);
+  const layer = createLcaLayerFromDraft(snapshot.project, analysis.areas, {
+    ...analysis,
+    model: `${analysis.model}@ollama`
+  });
 
   return {
     status: "analysis-ready",
+    provider: "ollama-cloud",
+    model,
     analysis,
     layer,
     evidence
   };
-}
-
-async function requestDeepSeekLca(prompt: ReturnType<typeof buildDeepSeekLcaPrompt>) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "DEEPSEEK_API_KEY is required for lca_analyze. Use dryRun to inspect the prompt without calling DeepSeek."
-    );
-  }
-
-  const baseUrl = process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com";
-  const model = process.env.DEEPSEEK_MODEL ?? prompt.model;
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: prompt.system },
-        { role: "user", content: prompt.user }
-      ],
-      response_format: { type: prompt.responseFormat },
-      temperature: prompt.temperature
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`DeepSeek LCA request failed with HTTP ${response.status}.`);
-  }
-
-  return response.json() as Promise<unknown>;
 }
 
 function parseProjectSnapshot(projectSnapshot?: unknown): ProjectSnapshot | null {
@@ -116,4 +128,17 @@ function parseProjectSnapshot(projectSnapshot?: unknown): ProjectSnapshot | null
       : projectSnapshot;
   const result = ProjectSnapshotSchema.safeParse(parsed);
   return result.success ? result.data : null;
+}
+
+function loadLcaSwanwickConstitution(): string {
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const constitutionPath = resolve(repoRoot, LCA_SWANWICK_CONSTITUTION_RELATIVE_PATH);
+
+  try {
+    return readFileSync(constitutionPath, "utf8");
+  } catch {
+    throw new Error(
+      `LCA constitution not found at ${constitutionPath}. Ensure Constitution/lca-swanwick.md exists in the Landschaft repository.`
+    );
+  }
 }

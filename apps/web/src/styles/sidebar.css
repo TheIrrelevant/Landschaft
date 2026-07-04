@@ -661,6 +661,14 @@
 
 .lca-analysis-intro,
 .lca-analysis-hint,
+.lca-analysis-warning {
+  color: #8a4b12;
+  background: #fff4e8;
+  border: 1px solid #e8c9a8;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
 .lca-analysis-message {
   color: var(--color-text-secondary);
   font-size: 12px;
@@ -720,6 +728,49 @@
   color: #ffffff;
   font-weight: var(--font-weight-semibold);
   padding: 10px 12px;
+}
+
+
+.lca-model-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.lca-model-primary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lca-model-chip {
+  border: 1px solid var(--border-subtle, #d8d8d4);
+  background: var(--surface-elevated, #f7f7f5);
+  color: var(--text-primary, #1f1f1d);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.lca-model-chip-more {
+  padding-inline: 8px;
+}
+
+.lca-model-chip-active {
+  border-color: #5f4b8b;
+  background: #efeaf8;
+  color: #3f315f;
+}
+
+.lca-model-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.lca-model-more select,
+.lca-analysis-field input[readonly] {
+  width: 100%;
 }
 
 .lca-analysis-run:disabled {

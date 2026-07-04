@@ -1,13 +1,20 @@
 /*
  * ---metadata---
  * type: app-source
- * description: Explicit LCA analysis mode panel for purpose, scope, and layer selection.
+ * description: Explicit LCA analysis mode panel for purpose, scope, provider, and model selection.
  * last-updated: 2026-07-04
  * last-model: composer-2.5
- * last-change: add explicit LCA analysis workflow panel
+ * last-change: add Ollama provider and featured DeepSeek model picker
  * ---end-metadata---
  */
-import { Sparkles, X } from "lucide-react";
+import { MoreHorizontal, Sparkles, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  LCA_FEATURED_OLLAMA_MODELS,
+  LCA_LLM_PROVIDER_LABEL,
+  LCA_OLLAMA_ANALYSIS_ENABLED,
+  LCA_OLLAMA_ANALYSIS_PAUSED_MESSAGE
+} from "@landschaft/shared";
 import { useEditorStore } from "../state/editorStore";
 
 export function LcaAnalysisPanel() {
@@ -16,18 +23,37 @@ export function LcaAnalysisPanel() {
     lcaAnalyzing,
     lcaAnalysisError,
     lcaAnalysisMode,
+    lcaAvailableModels,
+    lcaModel,
+    lcaModelsError,
+    lcaModelsLoading,
     lcaOutputQuality,
     lcaPurpose,
     lcaSelectedLayerIds,
     layers,
     runLcaDraftAnalysis,
     setLcaAnalysisMode,
+    setLcaModel,
     setLcaOutputQuality,
     setLcaPurpose,
     terrainGenerated,
     toggleLcaInputLayer,
     workflowMode
   } = useEditorStore();
+
+  const [showMoreModels, setShowMoreModels] = useState(false);
+
+  const featuredModelIds = useMemo(
+    () => new Set(LCA_FEATURED_OLLAMA_MODELS.map((entry) => entry.id)),
+    []
+  );
+
+  const otherModels = useMemo(
+    () => lcaAvailableModels.filter((modelId) => !featuredModelIds.has(modelId)),
+    [featuredModelIds, lcaAvailableModels]
+  );
+
+  const usingFeaturedModel = featuredModelIds.has(lcaModel);
 
   if (workflowMode !== "lca-analysis") {
     return null;
@@ -54,10 +80,84 @@ export function LcaAnalysisPanel() {
         </button>
       </header>
 
+      {!LCA_OLLAMA_ANALYSIS_ENABLED ? (
+        <p className="lca-analysis-message lca-analysis-warning">{LCA_OLLAMA_ANALYSIS_PAUSED_MESSAGE}</p>
+      ) : null}
+
       <p className="lca-analysis-intro">
         Desk-study workflow for draft landscape character areas. Review all generated
         polygons before planning use.
       </p>
+
+      <label className="lca-analysis-field">
+        <span>LLM provider</span>
+        <input readOnly type="text" value={LCA_LLM_PROVIDER_LABEL} />
+      </label>
+
+      <div className="lca-analysis-field">
+        <span>Model</span>
+        <div className="lca-model-picker">
+          <div className="lca-model-primary">
+            {LCA_FEATURED_OLLAMA_MODELS.map((entry) => (
+              <button
+                className={
+                  lcaModel === entry.id
+                    ? "lca-model-chip lca-model-chip-active"
+                    : "lca-model-chip"
+                }
+                disabled={lcaAnalyzing}
+                key={entry.id}
+                onClick={() => {
+                  setLcaModel(entry.id);
+                  setShowMoreModels(false);
+                }}
+                type="button"
+              >
+                {entry.label}
+              </button>
+            ))}
+            <button
+              aria-expanded={showMoreModels}
+              aria-label="Show more models"
+              className={
+                showMoreModels || !usingFeaturedModel
+                  ? "lca-model-chip lca-model-chip-active"
+                  : "lca-model-chip lca-model-chip-more"
+              }
+              disabled={lcaAnalyzing}
+              onClick={() => setShowMoreModels((current) => !current)}
+              type="button"
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          </div>
+
+          {showMoreModels || !usingFeaturedModel ? (
+            <label className="lca-model-more">
+              <span className="sr-only">More Ollama Cloud models</span>
+              <select
+                disabled={lcaAnalyzing || lcaModelsLoading || otherModels.length === 0}
+                onChange={(event) => setLcaModel(event.target.value)}
+                value={lcaModel}
+              >
+                {otherModels.length === 0 ? (
+                  <option value={lcaModel}>{lcaModel}</option>
+                ) : (
+                  otherModels.map((modelId) => (
+                    <option key={modelId} value={modelId}>
+                      {modelId}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+          ) : null}
+        </div>
+        {lcaModelsLoading ? (
+          <p className="lca-analysis-hint">Loading Ollama Cloud models...</p>
+        ) : null}
+        {lcaModelsError ? <p className="lca-analysis-message">{lcaModelsError}</p> : null}
+      </div>
 
       <label className="lca-analysis-field">
         <span>Assessment purpose</span>
@@ -129,18 +229,36 @@ export function LcaAnalysisPanel() {
         )}
       </fieldset>
 
+      {LCA_OLLAMA_ANALYSIS_ENABLED && lcaAnalyzing ? (
+        <p className="lca-analysis-hint">Ollama Cloud analysis may take up to 3 minutes. Refresh the page to cancel a stuck request.</p>
+      ) : null}
+
       <button
         className="lca-analysis-run"
-        disabled={!terrainGenerated || !inputLayers.length || lcaAnalyzing}
+        disabled={!LCA_OLLAMA_ANALYSIS_ENABLED || !terrainGenerated || !inputLayers.length || lcaAnalyzing}
         onClick={() => {
           void runLcaDraftAnalysis();
         }}
         type="button"
       >
-        {lcaAnalyzing ? "Analyzing..." : "Run draft LCA analysis"}
+        {!LCA_OLLAMA_ANALYSIS_ENABLED
+          ? "LCA analysis paused"
+          : lcaAnalyzing
+            ? `Calling Ollama Cloud (${lcaModel})...`
+            : "Run draft LCA analysis"}
       </button>
 
-      {lcaAnalysisError ? <p className="lca-analysis-message">{lcaAnalysisError}</p> : null}
+      {lcaAnalysisError ? (
+        <p
+          className={
+            lcaAnalysisError.includes("mock draft")
+              ? "lca-analysis-message lca-analysis-warning"
+              : "lca-analysis-message"
+          }
+        >
+          {lcaAnalysisError}
+        </p>
+      ) : null}
     </section>
   );
 }

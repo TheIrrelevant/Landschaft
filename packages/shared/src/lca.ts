@@ -21,6 +21,8 @@ import {
   findIntersectingEvidence,
   scoreDominantThemeValues
 } from "./lcaEvidenceMatching.js";
+import { prepareLcaConstitutionForPrompt } from "./lcaConstitution.js";
+import { LCA_DEFAULT_OLLAMA_MODEL } from "./lcaLlm.js";
 import {
   LCA_KNOWLEDGE_BANK_VERSION,
   type LcaCodeTheme
@@ -32,8 +34,12 @@ export type LcaOutputQuality = "conceptual" | "professional" | "report-ready";
 export interface LcaDraftAnalysisRequest {
   purpose: string;
   evidence: MapReadResult;
+  /** Full Landschaft LCA constitution markdown. Required for DeepSeek analysis. */
+  constitution?: string;
   analysisMode?: LcaAnalysisMode;
   outputQuality?: LcaOutputQuality;
+  model?: string;
+  provider?: "ollama-cloud";
 }
 
 export interface LcaDraftAnalysisResult {
@@ -48,6 +54,7 @@ export interface DeepSeekLcaPrompt {
   model: string;
   promptVersion: string;
   system: string;
+  constitution: string;
   user: string;
   responseFormat: "json_object";
   temperature: number;
@@ -88,8 +95,8 @@ export interface MapWriteDraftResult {
 
 const LCA_LAYER_ID = "landscape-character-assessment";
 const LCA_PROMPT_VERSION = "lca-mvp-v1";
-export const LCA_DEEPSEEK_MODEL = "deepseek-reasoner";
-export const LCA_DEEPSEEK_PROMPT_VERSION = "lca-deepseek-v1";
+export const LCA_DEEPSEEK_MODEL = LCA_DEFAULT_OLLAMA_MODEL;
+export const LCA_DEEPSEEK_PROMPT_VERSION = "lca-deepseek-v2";
 export function generateLcaCodedId() {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
   return Array.from({ length: 10 }, () => {
@@ -122,20 +129,26 @@ export function generateMockLcaDraft(
 }
 
 export function buildDeepSeekLcaPrompt(
-  request: LcaDraftAnalysisRequest
+  request: LcaDraftAnalysisRequest & { constitution: string }
 ): DeepSeekLcaPrompt {
+  const constitution = prepareLcaConstitutionForPrompt(request.constitution);
+  const model = request.model ?? LCA_DEFAULT_OLLAMA_MODEL;
+
   return {
-    model: LCA_DEEPSEEK_MODEL,
+    model,
     promptVersion: LCA_DEEPSEEK_PROMPT_VERSION,
     responseFormat: "json_object",
     temperature: 0.2,
     system: [
       "You are a landscape character assessment assistant for Landschaft.",
-      "Use Carys Swanwick Landscape Character Assessment principles.",
+      "Read the Landschaft LCA Constitution in full before analyzing map evidence.",
+      "Follow Carys Swanwick's four-step iterative LCA process and the five key principles exactly.",
+      "Apply Step 2 desk study and Step 4 classification using only the supplied map evidence.",
       "Do not invent evidence outside the supplied map evidence.",
-      "Separate factual baseline interpretation from design judgement.",
-      "Return only valid JSON matching the requested schema."
+      "Separate factual baseline character description from sensitivity, capacity, or design judgement.",
+      "Return only valid JSON matching the requested schema in the user message."
     ].join(" "),
+    constitution,
     user: JSON.stringify(
       {
         task: "Draft candidate Landscape Character Assessment areas.",
@@ -204,12 +217,17 @@ export function parseDeepSeekLcaDraftResponse(
 
   return {
     areas,
-    model: getStringValue(payload, "model") ?? LCA_DEEPSEEK_MODEL,
+    model: getStringValue(payload, "model") ?? request.model ?? LCA_DEEPSEEK_MODEL,
     promptVersion:
       getStringValue(payload, "promptVersion") ?? LCA_DEEPSEEK_PROMPT_VERSION,
     inputLayerIds: request.evidence.selectedLayerIds,
     evidenceFeatures: request.evidence.features
   };
+}
+
+export interface CreateLcaLayerOptions {
+  layerId?: string;
+  layerName?: string;
 }
 
 export function createLcaLayerFromDraft(
@@ -218,13 +236,15 @@ export function createLcaLayerFromDraft(
   analysis: Pick<
     LcaDraftAnalysisResult,
     "model" | "promptVersion" | "inputLayerIds" | "evidenceFeatures"
-  >
+  >,
+  options?: CreateLcaLayerOptions
 ): PlanningLayer {
   const features = areas.map((area) => codedAreaToVectorFeature(area, analysis));
+  const generatedAt = new Date().toISOString().slice(0, 10);
 
   return {
-    id: LCA_LAYER_ID,
-    name: "Landscape Character Assessment",
+    id: options?.layerId ?? `lca-${generateLcaCodedId()}`,
+    name: options?.layerName ?? `Landscape Character Assessment (${generatedAt})`,
     kind: "lca",
     visible: true,
     opacity: 0.82,
@@ -267,18 +287,22 @@ export function applyMapWriteDraft(
   const existingLayer = existingLayers.find(
     (layer) => layer.id === (request.targetLayerId ?? LCA_LAYER_ID)
   );
-  const layer = createLcaLayerFromDraft(project, validatedAreas, {
-    model: analysisMeta?.model ?? "external-llm",
-    promptVersion: analysisMeta?.promptVersion ?? LCA_PROMPT_VERSION,
-    inputLayerIds:
-      analysisMeta?.inputLayerIds ??
-      existingLayer?.features?.map((feature) => feature.id) ??
-      []
-  });
-
-  if (request.createLayerName) {
-    layer.name = request.createLayerName;
-  }
+  const layer = createLcaLayerFromDraft(
+    project,
+    validatedAreas,
+    {
+      model: analysisMeta?.model ?? "external-llm",
+      promptVersion: analysisMeta?.promptVersion ?? LCA_PROMPT_VERSION,
+      inputLayerIds:
+        analysisMeta?.inputLayerIds ??
+        existingLayer?.features?.map((feature) => feature.id) ??
+        []
+    },
+    {
+      layerId: request.targetLayerId ?? LCA_LAYER_ID,
+      layerName: request.createLayerName
+    }
+  );
 
   return {
     status: "draft-written",
@@ -631,7 +655,7 @@ function clampConfidence(value: number) {
   return Math.min(Math.max(value, 0), 1);
 }
 
-function extractDeepSeekContent(response: unknown): unknown {
+export function extractLlmResponseContent(response: unknown): unknown {
   if (typeof response === "string") {
     return response;
   }
@@ -640,17 +664,24 @@ function extractDeepSeekContent(response: unknown): unknown {
     return response;
   }
 
+  const ollamaMessage = response.message;
+  if (isRecord(ollamaMessage) && typeof ollamaMessage.content === "string") {
+    return ollamaMessage.content;
+  }
+
   const choices = response.choices;
-  if (!Array.isArray(choices) || choices.length === 0 || !isRecord(choices[0])) {
-    return response;
+  if (Array.isArray(choices) && choices.length > 0 && isRecord(choices[0])) {
+    const message = choices[0].message;
+    if (isRecord(message) && typeof message.content === "string") {
+      return message.content;
+    }
   }
 
-  const message = choices[0].message;
-  if (!isRecord(message)) {
-    return response;
-  }
+  return response;
+}
 
-  return typeof message.content === "string" ? message.content : response;
+function extractDeepSeekContent(response: unknown): unknown {
+  return extractLlmResponseContent(response);
 }
 
 function parseJsonPayload(value: unknown): Record<string, unknown> {

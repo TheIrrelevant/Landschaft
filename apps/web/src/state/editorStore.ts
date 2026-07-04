@@ -4,13 +4,21 @@
  * description: Zustand store for Landschaft editor layers and selected area state.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: add explicit LCA analysis workflow mode and backend parameters
+ * last-change: disable auto-opening inspector drawer on selection
  * ---end-metadata---
  */
 import {
   buildMapEvidence,
   createLcaLayerFromDraft,
+  applySafeDatasetLayerStack,
+  buildKnowledgeBankFromLayers,
+  enrichLayersForKnowledgeBank,
   generateMockLcaDraft,
+  getSafeDatasetDefaultOpacity,
+  LCA_DEFAULT_OLLAMA_MODEL,
+  LCA_LLM_PROVIDER,
+  LCA_OLLAMA_ANALYSIS_ENABLED,
+  LCA_OLLAMA_ANALYSIS_PAUSED_MESSAGE,
   type LcaAnalysisMode,
   type LcaOutputQuality,
   getDefaultLcaInputLayerIds,
@@ -33,12 +41,28 @@ import {
 } from "@landschaft/shared";
 import { create } from "zustand";
 import {
+  createEmptyKnowledgeBankSheet,
+  normalizeKnowledgeBankSheet,
+  sheetFromKnowledgeBankLayers,
+  updateSheetCell,
+  type KnowledgeBankSheetSnapshot
+} from "../ui/knowledgeBankSheet";
+import {
   clipVectorFeaturesToExtent,
   createRasterGeoreferenceFromWorldFile,
   exportLayerAsGeoJson,
   parseWorldFile,
   snapCoordinate
 } from "../geo/projectGeometry";
+import {
+  clearProjectSnapshot,
+  loadKnowledgeBankSheetFromPersistence,
+  loadKnowledgeBankSheetLegacySync,
+  loadProjectSnapshotFromPersistence,
+  loadProjectSnapshotLegacySync,
+  saveKnowledgeBankSheet,
+  saveProjectSnapshot
+} from "./projectPersistence";
 
 type EditorMode = "top-view" | "terrain-3d";
 type EditorWorkflowMode = "design" | "lca-analysis";
@@ -133,6 +157,19 @@ interface EditorState {
   workflowMode: EditorWorkflowMode;
   lcaAnalysisMode: LcaAnalysisMode;
   lcaOutputQuality: LcaOutputQuality;
+  lcaProvider: typeof LCA_LLM_PROVIDER;
+  lcaModel: string;
+  lcaAvailableModels: string[];
+  lcaModelsLoading: boolean;
+  lcaModelsError: string | null;
+  knowledgeBaseOpen: boolean;
+  knowledgeBankGrid: string[][];
+  knowledgeBankColumnWidths: number[];
+  knowledgeBankRowHeights: number[];
+  knowledgeBankColumnHeaders: string[];
+  knowledgeBankMaterialColors: string[];
+  knowledgeBankTextSummary: string;
+  knowledgeBankImportMessage: string | null;
   coordinateStep: number | null;
   inspectorOpen: boolean;
   activeMode: EditorMode;
@@ -171,8 +208,17 @@ interface EditorState {
   toggleLcaInputLayer: (layerId: string) => void;
   enterLcaAnalysisMode: () => void;
   exitLcaAnalysisMode: () => void;
+  openKnowledgeBase: () => void;
+  closeKnowledgeBase: () => void;
+  importKnowledgeBankSheet: (fileName: string, grid: string[][]) => void;
+  syncKnowledgeBankFromLayers: () => Promise<void>;
+  setKnowledgeBankCell: (row: number, col: number, value: string) => void;
+  setKnowledgeBankColumnWidth: (col: number, width: number) => void;
+  setKnowledgeBankRowHeight: (row: number, height: number) => void;
   setLcaAnalysisMode: (mode: LcaAnalysisMode) => void;
   setLcaOutputQuality: (quality: LcaOutputQuality) => void;
+  setLcaModel: (model: string) => void;
+  fetchLcaModels: () => Promise<void>;
   runLcaDraftAnalysis: () => Promise<void>;
   setSelectedFeatureReviewStatus: (reviewStatus: ReviewStatus) => void;
   setSelectedLayerReviewStatus: (reviewStatus: ReviewStatus) => void;
@@ -306,8 +352,6 @@ const baseTerrainRequest: TerrainGenerationRequest = {
 };
 
 const initialTerrainProject = generateTerrainProject(baseTerrainRequest);
-const PROJECT_SNAPSHOT_STORAGE_KEY = "landschaft.project.snapshot.v3";
-
 export function canDeleteLayer(layer: PlanningLayer) {
   return Boolean(layer.id);
 }
@@ -678,7 +722,8 @@ function createSafeDatasetLayers(
   location: SafeDatasetLocation,
   datasetIds: SafeDatasetId[]
 ): PlanningLayer[] {
-  return datasetIds.map((datasetId) => {
+  return applySafeDatasetLayerStack(
+    datasetIds.map((datasetId) => {
     const dataset = safeDatasetCatalog[datasetId];
     return {
       id: `safe-data-${datasetId}`,
@@ -720,7 +765,8 @@ function createSafeDatasetLayers(
       ],
       locked: true
     };
-  });
+  })
+  );
 }
 
 function getSafeDatasetColor(datasetId: SafeDatasetId) {
@@ -762,13 +808,7 @@ function isSafeDatasetRaster(datasetId: SafeDatasetId) {
 }
 
 function getDefaultSafeDatasetOpacity(datasetId: SafeDatasetId) {
-  if (datasetId === "land-cover") {
-    return 0.72;
-  }
-  if (datasetId === "woodland") {
-    return 0.68;
-  }
-  return isSafeDatasetRaster(datasetId) ? 1 : 0.68;
+  return getSafeDatasetDefaultOpacity(datasetId);
 }
 
 function createTerrainRequest(
@@ -786,42 +826,50 @@ function createTerrainRequest(
   };
 }
 
-function loadProjectSnapshot(): ProjectSnapshot | null {
-  if (typeof window === "undefined") {
-    return null;
+function normalizeStoredKnowledgeBankSheet(
+  parsed: Partial<KnowledgeBankSheetSnapshot> | null
+): KnowledgeBankSheetSnapshot {
+  if (!parsed || !Array.isArray(parsed.rows)) {
+    return createEmptyKnowledgeBankSheet();
   }
 
-  const rawSnapshot = window.localStorage.getItem(PROJECT_SNAPSHOT_STORAGE_KEY);
-  if (!rawSnapshot) {
-    return null;
-  }
-
-  try {
-    const parsedSnapshot = JSON.parse(rawSnapshot) as unknown;
-    const result = ProjectSnapshotSchema.safeParse(parsedSnapshot);
-    return result.success ? result.data : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveProjectSnapshot(snapshot: ProjectSnapshot) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(
-    PROJECT_SNAPSHOT_STORAGE_KEY,
-    JSON.stringify(snapshot)
+  return normalizeKnowledgeBankSheet(
+    parsed.rows,
+    Array.isArray(parsed.columnWidths) ? parsed.columnWidths : [],
+    Array.isArray(parsed.rowHeights) ? parsed.rowHeights : [],
+    {
+      columnHeaders: Array.isArray(parsed.columnHeaders) ? parsed.columnHeaders : undefined,
+      materialColors: Array.isArray(parsed.materialColors) ? parsed.materialColors : undefined,
+      textSummary: typeof parsed.textSummary === "string" ? parsed.textSummary : undefined
+    }
   );
 }
 
-function clearProjectSnapshot() {
-  if (typeof window === "undefined") {
-    return;
+function loadKnowledgeBankSheet(): KnowledgeBankSheetSnapshot {
+  const legacySheet = loadKnowledgeBankSheetLegacySync();
+  return normalizeStoredKnowledgeBankSheet(legacySheet);
+}
+
+function applyKnowledgeBankSheetToState(sheet: KnowledgeBankSheetSnapshot) {
+  saveKnowledgeBankSheet(sheet);
+  return {
+    knowledgeBankGrid: sheet.rows,
+    knowledgeBankColumnWidths: sheet.columnWidths,
+    knowledgeBankRowHeights: sheet.rowHeights,
+    knowledgeBankColumnHeaders: sheet.columnHeaders ?? [],
+    knowledgeBankMaterialColors: sheet.materialColors ?? [],
+    knowledgeBankTextSummary: sheet.textSummary ?? ""
+  };
+}
+
+function loadProjectSnapshot(): ProjectSnapshot | null {
+  const legacySnapshot = loadProjectSnapshotLegacySync();
+  if (!legacySnapshot) {
+    return null;
   }
 
-  window.localStorage.removeItem(PROJECT_SNAPSHOT_STORAGE_KEY);
+  const result = ProjectSnapshotSchema.safeParse(legacySnapshot);
+  return result.success ? result.data : null;
 }
 
 function toProjectSnapshot(state: EditorPersistedState): ProjectSnapshot {
@@ -838,6 +886,20 @@ function toProjectSnapshot(state: EditorPersistedState): ProjectSnapshot {
 }
 
 const storedProjectSnapshot = loadProjectSnapshot();
+const storedKnowledgeBankSheet = loadKnowledgeBankSheet();
+
+function applyProjectSnapshotToState(snapshot: ProjectSnapshot) {
+  return {
+    project: snapshot.project,
+    terrain: snapshot.terrain,
+    layers: snapshot.layers,
+    terrainGenerated: snapshot.terrainGenerated,
+    selectedLayerId: snapshot.selectedLayerId,
+    selectedFeatureId: snapshot.selectedFeatureId ?? null,
+    coordinateStep: snapshot.coordinateStep ?? null,
+    orthophotoPreviewUrl: snapshot.orthophotoPreviewUrl ?? null
+  };
+}
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   layers: storedProjectSnapshot?.layers ?? [],
@@ -868,6 +930,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   workflowMode: "design",
   lcaAnalysisMode: "desk-study",
   lcaOutputQuality: "professional",
+  lcaProvider: LCA_LLM_PROVIDER,
+  lcaModel: LCA_DEFAULT_OLLAMA_MODEL,
+  lcaAvailableModels: [],
+  lcaModelsLoading: false,
+  lcaModelsError: null,
+  knowledgeBaseOpen: false,
+  knowledgeBankGrid: storedKnowledgeBankSheet.rows,
+  knowledgeBankColumnWidths: storedKnowledgeBankSheet.columnWidths,
+  knowledgeBankRowHeights: storedKnowledgeBankSheet.rowHeights,
+  knowledgeBankColumnHeaders: storedKnowledgeBankSheet.columnHeaders ?? [],
+  knowledgeBankMaterialColors: storedKnowledgeBankSheet.materialColors ?? [],
+  knowledgeBankTextSummary: storedKnowledgeBankSheet.textSummary ?? "",
+  knowledgeBankImportMessage: null,
   hoveredFeatureId: null,
   hoveredLayerId: null,
   selectedArea: null,
@@ -1452,16 +1527,133 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           : [...state.lcaSelectedLayerIds, layerId]
       };
     }),
-  enterLcaAnalysisMode: () =>
+  enterLcaAnalysisMode: () => {
     set({
       workflowMode: "lca-analysis",
       activeMode: "top-view",
-      inspectorOpen: true
-    }),
+      lcaAnalysisError: LCA_OLLAMA_ANALYSIS_ENABLED
+        ? null
+        : LCA_OLLAMA_ANALYSIS_PAUSED_MESSAGE
+    });
+    if (LCA_OLLAMA_ANALYSIS_ENABLED) {
+      void get().fetchLcaModels();
+    }
+  },
   exitLcaAnalysisMode: () => set({ workflowMode: "design" }),
+  openKnowledgeBase: () =>
+    set({
+      knowledgeBaseOpen: true,
+      knowledgeBankImportMessage: null
+    }),
+  closeKnowledgeBase: () => set({ knowledgeBaseOpen: false }),
+  importKnowledgeBankSheet: (fileName, grid) =>
+    set(() => {
+      const sheet = normalizeKnowledgeBankSheet(grid, [], []);
+      return {
+        ...applyKnowledgeBankSheetToState(sheet),
+        knowledgeBankImportMessage: `Imported ${sheet.rows.length} rows from ${fileName}.`
+      };
+    }),
+  syncKnowledgeBankFromLayers: async () => {
+    const state = get();
+    set({ knowledgeBankImportMessage: "Resolving soil map unit names from USDA NRCS..." });
+
+    try {
+      const enrichedLayers = await enrichLayersForKnowledgeBank(state.layers);
+      const result = buildKnowledgeBankFromLayers(enrichedLayers);
+      const sheet = sheetFromKnowledgeBankLayers(result);
+      set({
+        ...applyKnowledgeBankSheetToState(sheet),
+        knowledgeBankImportMessage:
+          result.recordCount > 0
+            ? `Synced ${result.recordCount} rows from ${result.layerCount} USGS / NAIP / USDA datasets.`
+            : "No USGS / NAIP / USDA NRCS map layers found to sync."
+      });
+    } catch (error) {
+      set({
+        knowledgeBankImportMessage:
+          error instanceof Error ? error.message : "Knowledge base sync failed."
+      });
+    }
+  },
+  setKnowledgeBankCell: (row, col, value) =>
+    set((state) => {
+      const sheet = updateSheetCell(
+        {
+          rows: state.knowledgeBankGrid,
+          columnWidths: state.knowledgeBankColumnWidths,
+          rowHeights: state.knowledgeBankRowHeights
+        },
+        row,
+        col,
+        value
+      );
+      return applyKnowledgeBankSheetToState(sheet);
+    }),
+  setKnowledgeBankColumnWidth: (col, width) =>
+    set((state) => {
+      const columnWidths = state.knowledgeBankColumnWidths.map((currentWidth, index) =>
+        index === col ? width : currentWidth
+      );
+      const sheet: KnowledgeBankSheetSnapshot = {
+        rows: state.knowledgeBankGrid,
+        columnWidths,
+        rowHeights: state.knowledgeBankRowHeights,
+        columnHeaders: state.knowledgeBankColumnHeaders,
+        materialColors: state.knowledgeBankMaterialColors,
+        textSummary: state.knowledgeBankTextSummary
+      };
+      return applyKnowledgeBankSheetToState(sheet);
+    }),
+  setKnowledgeBankRowHeight: (row, height) =>
+    set((state) => {
+      const rowHeights = state.knowledgeBankRowHeights.map((currentHeight, index) =>
+        index === row ? height : currentHeight
+      );
+      const sheet: KnowledgeBankSheetSnapshot = {
+        rows: state.knowledgeBankGrid,
+        columnWidths: state.knowledgeBankColumnWidths,
+        rowHeights,
+        columnHeaders: state.knowledgeBankColumnHeaders,
+        materialColors: state.knowledgeBankMaterialColors,
+        textSummary: state.knowledgeBankTextSummary
+      };
+      return applyKnowledgeBankSheetToState(sheet);
+    }),
   setLcaAnalysisMode: (mode) => set({ lcaAnalysisMode: mode }),
   setLcaOutputQuality: (quality) => set({ lcaOutputQuality: quality }),
+  setLcaModel: (model) => set({ lcaModel: model }),
+  fetchLcaModels: async () => {
+    set({ lcaModelsLoading: true, lcaModelsError: null });
+
+    try {
+      const models = await fetchLcaModels(safeDatasetBridgeUrl);
+      set({
+        lcaAvailableModels: models,
+        lcaModelsLoading: false,
+        lcaModel: models.includes(get().lcaModel)
+          ? get().lcaModel
+          : models.includes(LCA_DEFAULT_OLLAMA_MODEL)
+            ? LCA_DEFAULT_OLLAMA_MODEL
+            : models[0] ?? LCA_DEFAULT_OLLAMA_MODEL
+      });
+    } catch (error) {
+      set({
+        lcaModelsLoading: false,
+        lcaModelsError:
+          error instanceof Error ? error.message : "Failed to load Ollama Cloud models."
+      });
+    }
+  },
   runLcaDraftAnalysis: async () => {
+    if (!LCA_OLLAMA_ANALYSIS_ENABLED) {
+      set({
+        lcaAnalyzing: false,
+        lcaAnalysisError: LCA_OLLAMA_ANALYSIS_PAUSED_MESSAGE
+      });
+      return;
+    }
+
     const state = get();
     set({ lcaAnalyzing: true, lcaAnalysisError: null });
 
@@ -1484,7 +1676,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           state.lcaPurpose,
           toProjectSnapshot(state),
           state.lcaAnalysisMode,
-          state.lcaOutputQuality
+          state.lcaOutputQuality,
+          state.lcaModel
         );
         layer = result.layer;
       } catch (backendError) {
@@ -1503,7 +1696,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           outputQuality: state.lcaOutputQuality
         });
         layer = createLcaLayerFromDraft(state.project, analysis.areas, analysis);
-        fallbackMessage = `MCP LCA backend unavailable; generated a local mock draft. ${
+        fallbackMessage = `Ollama Cloud was not reached — generated a local mock draft instead. ${
           backendError instanceof Error ? backendError.message : "Unknown backend error."
         }`;
       }
@@ -1519,7 +1712,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         selectedLayerId: layer.id,
         selectedFeatureId: layer.features?.[0]?.id ?? null,
         selectedVertexIndex: null,
-        inspectorOpen: true
+        inspectorOpen: false
       };
       saveProjectSnapshot(toProjectSnapshot({ ...state, ...nextState }));
       set(nextState);
@@ -1617,8 +1810,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       );
 
       return {
-        selectedFeatureId: featureId,
-        inspectorOpen: true
+        selectedFeatureId: featureId
       };
     }),
   selectFeatureInLayer: (layerId, featureId) =>
@@ -1638,8 +1830,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return {
         selectedLayerId: layerId,
         selectedFeatureId: featureId,
-        selectedArea,
-        inspectorOpen: true
+        selectedArea
       };
     }),
   selectLayer: (layerId) =>
@@ -1652,8 +1843,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       return {
       selectedLayerId: layerId,
-      selectedFeatureId,
-      inspectorOpen: true
+      selectedFeatureId
       };
     }),
   setMode: (mode) => set({ activeMode: mode }),
@@ -1730,12 +1920,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     try {
       const result = await fetchSafeDatasetImport(location.id, datasetIds);
-      const layers = result.layers;
+      const layers = applySafeDatasetLayerStack(result.layers);
+      const enrichedImportLayers = await enrichLayersForKnowledgeBank(layers);
+      const knowledgeBankSheet = sheetFromKnowledgeBankLayers(
+        buildKnowledgeBankFromLayers(enrichedImportLayers)
+      );
+      saveKnowledgeBankSheet(knowledgeBankSheet);
       const nextState = {
         activeMode: "terrain-3d" as const,
         project: result.project,
         terrain: result.terrain,
-        layers,
+        layers: enrichedImportLayers,
         orthophotoPreviewUrl: null,
         selectedLayerId: "terrain-mesh",
         selectedFeatureId: null,
@@ -1751,7 +1946,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         coordinateStep: 4
       };
       saveProjectSnapshot(toProjectSnapshot(nextState));
-      set(nextState);
+      set({
+        ...nextState,
+        ...applyKnowledgeBankSheetToState(knowledgeBankSheet),
+        knowledgeBankImportMessage: `Knowledge base updated with ${knowledgeBankSheet.rows.filter((row) => row.some((cell) => cell.trim())).length} rows from imported datasets.`
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Safe dataset import failed.";
@@ -1813,6 +2012,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     })
 }));
 
+export async function hydrateEditorPersistence() {
+  const [projectSnapshot, knowledgeBankSheet] = await Promise.all([
+    loadProjectSnapshotFromPersistence(),
+    loadKnowledgeBankSheetFromPersistence()
+  ]);
+
+  const nextState: Partial<EditorState> = {};
+
+  if (projectSnapshot) {
+    const parsed = ProjectSnapshotSchema.safeParse(projectSnapshot);
+    if (parsed.success) {
+      Object.assign(nextState, applyProjectSnapshotToState(parsed.data));
+    }
+  }
+
+  if (knowledgeBankSheet) {
+    Object.assign(
+      nextState,
+      applyKnowledgeBankSheetToState(normalizeStoredKnowledgeBankSheet(knowledgeBankSheet))
+    );
+  }
+
+  if (Object.keys(nextState).length > 0) {
+    useEditorStore.setState(nextState);
+  }
+}
+
+
 async function fetchSafeDatasetImport(
   locationId: string,
   datasetIds: SafeDatasetId[]
@@ -1851,37 +2078,79 @@ async function fetchSafeDatasetImport(
   return (await response.json()) as SafeDatasetBackendImportResult;
 }
 
+async function fetchLcaModels(bridgeUrl: string): Promise<string[]> {
+  let response: Response;
+
+  try {
+    response = await fetch(`${bridgeUrl}/lca/models`);
+  } catch (error) {
+    throw new Error(
+      `LCA model listing is unavailable at ${bridgeUrl}. Start the MCP server with npm run dev:mcp.`,
+      { cause: error }
+    );
+  }
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    throw new Error(
+      payload?.error ??
+        "LCA model listing is unavailable. Start the MCP server with npm run dev:mcp."
+    );
+  }
+
+  const payload = (await response.json()) as { models?: string[] };
+  return payload.models ?? [];
+}
+
+const LCA_ANALYZE_TIMEOUT_MS = 200_000;
+
 async function fetchLcaAnalysis(
   projectId: string,
   selectedLayerIds: string[],
   purpose: string,
   projectSnapshot: ProjectSnapshot,
   analysisMode: LcaAnalysisMode,
-  outputQuality: LcaOutputQuality
+  outputQuality: LcaOutputQuality,
+  model: string
 ): Promise<LcaBackendAnalysisResult> {
   let response: Response;
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), LCA_ANALYZE_TIMEOUT_MS);
 
   try {
     response = await fetch(`${safeDatasetBridgeUrl}/lca/analyze`, {
       body: JSON.stringify({
         projectId,
         selectedLayerIds,
-        geometryDetail: "simplified",
+        geometryDetail: "summary",
         purpose,
         analysisMode,
         outputQuality,
+        model,
+        provider: "ollama-cloud",
         projectSnapshot
       }),
       headers: {
         "content-type": "application/json"
       },
-      method: "POST"
+      method: "POST",
+      signal: controller.signal
     });
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(
+        `LCA analysis timed out after ${Math.round(LCA_ANALYZE_TIMEOUT_MS / 1000)} seconds. Try fewer input layers or DeepSeek V4 Flash.`
+      );
+    }
     throw new Error(
       `LCA backend is unavailable at ${safeDatasetBridgeUrl}. Start the MCP server with npm run dev:mcp or set VITE_LANDSCHAFT_MCP_HTTP_URL.`,
       { cause: error }
     );
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 
   if (!response.ok) {

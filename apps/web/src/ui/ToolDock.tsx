@@ -7,7 +7,7 @@
  * last-change: open explicit LCA analysis mode from tool dock
  * ---end-metadata---
  */
-import { Map, MapPin, Pentagon, Route, Shapes, Sparkles } from "lucide-react";
+import { BookOpen, Map, MapPin, Pentagon, Route, Shapes, Sparkles } from "lucide-react";
 import { useRef, useState } from "react";
 import { fromArrayBuffer } from "geotiff";
 import { createRasterGeoreferenceFromMapBounds } from "../geo/projectGeometry";
@@ -24,6 +24,8 @@ export function ToolDock() {
     lcaAnalysisError,
     project,
     enterLcaAnalysisMode,
+    knowledgeBaseOpen,
+    openKnowledgeBase,
     terrainGenerated
   } = useEditorStore();
   const [toolError, setToolError] = useState<string | null>(null);
@@ -87,6 +89,19 @@ export function ToolDock() {
           <Pentagon size={18} strokeWidth={1.75} />
         </button>
       </div>
+
+      <div className="tool-dock-separator" />
+
+      <button
+        aria-label="Open knowledge base"
+        aria-pressed={knowledgeBaseOpen}
+        className={knowledgeBaseOpen ? "tool-dock-button tool-dock-button-active" : "tool-dock-button"}
+        onClick={() => openKnowledgeBase()}
+        title="Knowledge base"
+        type="button"
+      >
+        <BookOpen size={18} strokeWidth={1.75} />
+      </button>
 
       <div className="tool-dock-separator" />
 

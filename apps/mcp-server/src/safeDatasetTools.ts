@@ -4,7 +4,7 @@
  * description: MCP handlers for USA safe-location dataset discovery and import.
  * last-updated: 2026-07-03
  * last-model: codex-gpt-5
- * last-change: add structures, boundaries, and woodland safe dataset imports
+ * last-change: apply canonical safe dataset layer stack and opacities on import
  * ---end-metadata---
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -18,7 +18,11 @@ import {
   type ProjectMetadata,
   type RasterGeoreference,
   type TerrainGenerationRequest,
-  type VectorFeature
+  type VectorFeature,
+  applySafeDatasetLayerStack,
+  fetchMapUnitNamesByMukey,
+  getSafeDatasetDefaultOpacity,
+  type SafeDatasetLayerKey
 } from "@landschaft/shared";
 
 export type SafeDatasetId =
@@ -408,7 +412,7 @@ export async function handleSafeDatasetImport(
     manifest,
     project: terrainResult.project,
     terrain: terrainResult.terrain,
-    layers: [...providerLayers, ...baseLayers],
+    layers: applySafeDatasetLayerStack([...providerLayers, ...baseLayers]),
     assets,
     status: "imported",
     limitations: [
@@ -843,7 +847,8 @@ function getContourQueryUrl(location: SafeDatasetLocation, limit: number) {
 
 async function fetchSoilFeatures(location: SafeDatasetLocation, limit: number) {
   const response = await fetchText(getSoilQueryUrl(location, limit));
-  return parseSoilGml(response);
+  const features = parseSoilGml(response);
+  return enrichSoilPolygonFeaturesWithNames(features);
 }
 
 function getSoilQueryUrl(location: SafeDatasetLocation, limit: number) {
@@ -872,6 +877,36 @@ async function fetchStructureFeatures(location: SafeDatasetLocation, limit: numb
     )
   );
   return responses.flat();
+}
+
+
+async function enrichSoilPolygonFeaturesWithNames(features: PolygonFeature[]) {
+  const mukeys = features
+    .map((feature) => feature.attributes?.mukey)
+    .filter((mukey): mukey is string | number => mukey != null)
+    .map((mukey) => String(mukey));
+
+  if (!mukeys.length) {
+    return features;
+  }
+
+  const namesByMukey = await fetchMapUnitNamesByMukey(mukeys);
+
+  return features.map((feature) => {
+    const mukey = feature.attributes?.mukey ? String(feature.attributes.mukey) : "";
+    const muname = mukey ? namesByMukey[mukey] : undefined;
+    if (!muname) {
+      return feature;
+    }
+
+    return {
+      ...feature,
+      attributes: {
+        ...feature.attributes,
+        muname
+      }
+    };
+  });
 }
 
 function getStructureQueryUrl(location: SafeDatasetLocation, layerId: number, limit: number) {
@@ -1026,7 +1061,7 @@ function createContourLayer(
     name: datasetLabels["usgs-contours"],
     kind: "foundational-map",
     visible: true,
-    opacity: 0.72,
+    opacity: getSafeDatasetDefaultOpacity("usgs-contours"),
     reviewStatus: "draft",
     category: "geomorphology",
     geometryType: "line",
@@ -1060,7 +1095,7 @@ function createHydrographyLayer(
     name: datasetLabels.hydrography,
     kind: "foundational-map",
     visible: true,
-    opacity: 0.88,
+    opacity: getSafeDatasetDefaultOpacity("hydrography"),
     reviewStatus: "draft",
     category: "hydrology",
     geometryType: "mixed",
@@ -1097,7 +1132,7 @@ function createTransportationLayer(
     name: datasetLabels.transportation,
     kind: "foundational-map",
     visible: true,
-    opacity: 0.84,
+    opacity: getSafeDatasetDefaultOpacity("transportation"),
     reviewStatus: "draft",
     category: "infrastructure-utilities",
     geometryType: "line",
@@ -1141,7 +1176,7 @@ function createSoilLayer(
     name: datasetLabels.soil,
     kind: "foundational-map",
     visible: true,
-    opacity: 0.58,
+    opacity: getSafeDatasetDefaultOpacity("soil"),
     reviewStatus: "draft",
     category: "soil",
     geometryType: "polygon",
@@ -1186,7 +1221,7 @@ function createStructuresLayer(
     name: datasetLabels.structures,
     kind: "foundational-map",
     visible: true,
-    opacity: 0.82,
+    opacity: getSafeDatasetDefaultOpacity("structures"),
     reviewStatus: "draft",
     category: "infrastructure-utilities",
     geometryType: "point",
@@ -1221,7 +1256,7 @@ function createBuildingsLayer(
     name: datasetLabels.buildings,
     kind: "foundational-map",
     visible: true,
-    opacity: 1,
+    opacity: getSafeDatasetDefaultOpacity("buildings"),
     reviewStatus: "draft",
     category: "land-use-settlement",
     geometryType: "polygon",
@@ -1266,7 +1301,7 @@ function createBoundariesLayer(
     name: datasetLabels.boundaries,
     kind: "foundational-map",
     visible: true,
-    opacity: 0.46,
+    opacity: getSafeDatasetDefaultOpacity("boundaries"),
     reviewStatus: "draft",
     category: "land-use-settlement",
     geometryType: "polygon",
@@ -1298,7 +1333,7 @@ function createSourceReferenceLayer(
     name: datasetLabels[datasetId],
     kind: datasetId === "naip-ortho" ? "orthophoto" : "foundational-map",
     visible: true,
-    opacity: getDefaultProviderLayerOpacity(datasetId),
+    opacity: getSafeDatasetDefaultOpacity(datasetId as SafeDatasetLayerKey),
     reviewStatus: "draft",
     category: getLayerCategory(datasetId),
     geometryType: isRaster ? "raster" : "mixed",
@@ -1770,6 +1805,7 @@ function getPolygonFeatureLabel(
     attributes.incorp_name ??
     attributes.unit_name ??
     attributes.unit_name ??
+    attributes.muname ??
     attributes.musym ??
     attributes.nationalmusym ??
     attributes.mukey ??
@@ -2109,16 +2145,6 @@ function isRasterDataset(datasetId: SafeDatasetId) {
     datasetId === "land-cover" ||
     datasetId === "woodland"
   );
-}
-
-function getDefaultProviderLayerOpacity(datasetId: SafeDatasetId) {
-  if (datasetId === "land-cover") {
-    return 0.72;
-  }
-  if (datasetId === "woodland") {
-    return 0.5;
-  }
-  return isRasterDataset(datasetId) ? 1 : 0.68;
 }
 
 function safeRatio(numerator: number, denominator: number) {

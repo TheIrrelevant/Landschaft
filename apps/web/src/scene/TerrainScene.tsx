@@ -4,7 +4,7 @@
  * description: Three.js terrain preview scene for the Landschaft editor.
  * last-updated: 2026-07-01
  * last-model: codex-gpt-5
- * last-change: cap one-to-one render scale for browser stability
+ * last-change: keep woodland out of generic raster rendering and stack masking
  * ---end-metadata---
  */
 import {
@@ -43,6 +43,7 @@ import type {
   RasterGeoreference,
   TerrainModel
 } from "@landschaft/shared";
+import { getSoilMapUnitColor } from "@landschaft/shared";
 import { useEditorStore } from "../state/editorStore";
 
 declare module "@react-three/fiber" {
@@ -113,20 +114,6 @@ const TERRAIN_DRAPED_RASTER_LAYER_IDS = new Set([
   "safe-data-dem-3dep",
   "safe-data-land-cover"
 ]);
-const SOIL_COLOR_PALETTE = [
-  "#b89655",
-  "#8fb56a",
-  "#c7885f",
-  "#d1b76a",
-  "#87a982",
-  "#b98f78",
-  "#9f9a63",
-  "#c2a173",
-  "#7fa18f",
-  "#d0a85c",
-  "#a7b86c",
-  "#b47c5f"
-];
 const BOUNDARY_KIND_COLORS: Record<string, string> = {
   county: "#7667b0",
   "incorporated-place": "#8d6aa8",
@@ -1519,8 +1506,16 @@ function isFullyOpaqueLayer(layer: PlanningLayer) {
   return layer.opacity >= FULL_LAYER_OPACITY;
 }
 
+function canSuppressLowerRasterLayers(layer: PlanningLayer) {
+  return layer.id !== "safe-data-woodland";
+}
+
 function isFullCoverageLayer(layer: PlanningLayer, terrainGenerated: boolean) {
   if (!layer.visible || layer.geometryType !== "raster" || !layer.rasterPreviewUrl) {
+    return false;
+  }
+
+  if (!canSuppressLowerRasterLayers(layer)) {
     return false;
   }
 
@@ -1814,6 +1809,47 @@ function WoodlandMarkerMesh({
   );
 }
 
+
+
+function RasterPlaneLayer({
+  clippingPlanes,
+  layer,
+  placement,
+  renderOrder
+}: {
+  clippingPlanes?: THREE.Plane[];
+  layer: PlanningLayer;
+  placement: {
+    position: [number, number, number];
+    sizeX: number;
+    sizeZ: number;
+  };
+  renderOrder: number;
+}) {
+  const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
+
+  return (
+    <mesh
+      position={placement.position}
+      renderOrder={renderOrder}
+      rotation={[-Math.PI / 2, 0, 0]}
+    >
+      <planeGeometry args={[placement.sizeX, placement.sizeZ]} />
+      <meshBasicNodeMaterial
+        clippingPlanes={clippingPlanes}
+        clipIntersection={false}
+        color={new Color(layer.style?.fill ?? "#4aa3cf")}
+        depthTest={false}
+        depthWrite={false}
+        map={rasterTexture ?? undefined}
+        opacity={layer.opacity}
+        side={FrontSide}
+        transparent={!isFullyOpaqueLayer(layer)}
+      />
+    </mesh>
+  );
+}
+
 function StructureModelLayer({
   layer,
   project,
@@ -2063,7 +2099,6 @@ function FoundationalLayerContent({
   const project = useEditorStore((state) => state.project);
   const selectFeatureInLayer = useEditorStore((state) => state.selectFeatureInLayer);
   const projectSpace = useMemo(() => getProjectSpace(project), [project]);
-  const rasterTexture = useOrthophotoTexture(layer.rasterPreviewUrl ?? null);
   const stackLift = getLayerStackLift(layers, layer.id);
   const lift =
     layer.id === "safe-data-boundaries"
@@ -2123,24 +2158,12 @@ function FoundationalLayerContent({
     );
 
     return (
-      <mesh
-        position={placement.position}
+      <RasterPlaneLayer
+        clippingPlanes={clippingPlanes}
+        layer={layer}
+        placement={placement}
         renderOrder={renderOrder}
-        rotation={[-Math.PI / 2, 0, 0]}
-      >
-        <planeGeometry args={[placement.sizeX, placement.sizeZ]} />
-        <meshBasicNodeMaterial
-          clippingPlanes={clippingPlanes}
-          clipIntersection={false}
-          color={new Color(layer.style?.fill ?? "#4aa3cf")}
-          depthTest={false}
-          depthWrite={false}
-          map={rasterTexture ?? undefined}
-          opacity={layer.opacity}
-          side={FrontSide}
-          transparent={!isFullyOpaqueLayer(layer)}
-        />
-      </mesh>
+      />
     );
   }
 
@@ -2749,7 +2772,7 @@ function getFeatureFillColor(
   feature: NonNullable<PlanningLayer["features"]>[number]
 ) {
   if (layer.id === "safe-data-soil") {
-    return getSoilFeatureColor(feature);
+    return getSoilMapUnitColor(feature);
   }
   if (layer.id === "safe-data-boundaries") {
     return getBoundaryFeatureColor(feature);
@@ -2763,7 +2786,7 @@ function getFeatureStrokeColor(
   feature: NonNullable<PlanningLayer["features"]>[number]
 ) {
   if (layer.id === "safe-data-soil") {
-    return darkenHex(getSoilFeatureColor(feature), 0.28);
+    return darkenHex(getSoilMapUnitColor(feature), 0.28);
   }
   if (layer.id === "safe-data-boundaries") {
     return darkenHex(getBoundaryFeatureColor(feature), 0.24);
@@ -2849,23 +2872,6 @@ function parseHeightMeters(value: unknown) {
   return raw.includes("ft") || raw.includes("'")
     ? clamp(numeric * 0.3048, 2.5, 120)
     : clamp(numeric, 2.5, 120);
-}
-
-function getSoilFeatureColor(feature: NonNullable<PlanningLayer["features"]>[number]) {
-  const key =
-    feature.attributes?.musym ??
-    feature.attributes?.nationalmusym ??
-    feature.attributes?.mukey ??
-    feature.label;
-  return SOIL_COLOR_PALETTE[hashString(String(key)) % SOIL_COLOR_PALETTE.length];
-}
-
-function hashString(value: string) {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
-  }
-  return hash;
 }
 
 function darkenHex(hex: string, amount: number) {

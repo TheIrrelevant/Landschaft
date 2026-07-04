@@ -3,9 +3,10 @@
  * description: MCP server exposing Landschaft planning editor terrain and map tools.
  * last-updated: 2026-07-04
  * last-model: codex-gpt-5
- * last-change: expose DeepSeek-backed LCA analysis tool
+ * last-change: add Ollama model listing and LCA provider routing
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { loadLocalEnvFiles } from "./loadEnv.js";
 import {
   CodedAreaSchema,
   generateTerrainProjectAsync,
@@ -14,13 +15,15 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { handleLcaAnalyze } from "./lcaTools.js";
+import { handleLcaAnalyze, handleLcaListModels } from "./lcaTools.js";
 import { handleMapRead, handleMapWriteDraft } from "./mapTools.js";
 import {
   handleSafeDatasetImport,
   handleSafeDatasetManifest,
   handleSafeDatasetSearch
 } from "./safeDatasetTools.js";
+
+loadLocalEnvFiles();
 
 const server = new McpServer({
   name: "landschaft",
@@ -169,13 +172,21 @@ server.tool(
 
 server.tool(
   "lca_analyze",
-  "Analyze selected map layers with DeepSeek and return a draft Landscape Character Assessment layer.",
+  "Analyze selected map layers with Ollama and return a draft Landscape Character Assessment layer.",
   {
     projectId: z.string(),
     selectedLayerIds: z.array(z.string()),
     extentAreaId: z.string().optional(),
     geometryDetail: z.enum(["summary", "simplified", "full"]).default("simplified"),
     purpose: z.string(),
+    analysisMode: z
+      .enum(["desk-study", "field-validation", "classification"])
+      .default("desk-study"),
+    outputQuality: z
+      .enum(["conceptual", "professional", "report-ready"])
+      .default("professional"),
+    model: z.string().optional(),
+    provider: z.literal("ollama-cloud").default("ollama-cloud"),
     dryRun: z.boolean().default(false),
     projectSnapshot: z.string().optional()
   },
@@ -185,6 +196,10 @@ server.tool(
     extentAreaId,
     geometryDetail,
     purpose,
+    analysisMode,
+    outputQuality,
+    model,
+    provider,
     dryRun,
     projectSnapshot
   }) => {
@@ -196,6 +211,10 @@ server.tool(
           extentAreaId,
           geometryDetail,
           purpose,
+          analysisMode,
+          outputQuality,
+          model,
+          provider,
           dryRun
         },
         projectSnapshot
@@ -418,6 +437,11 @@ function startHttpBridge() {
         return;
       }
 
+      if (request.method === "GET" && url.pathname === "/lca/models") {
+        sendJson(response, await handleLcaListModels());
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/lca/analyze") {
         const body = await readJsonBody(request);
         sendJson(
@@ -430,6 +454,10 @@ function startHttpBridge() {
                 typeof body.extentAreaId === "string" ? body.extentAreaId : undefined,
               geometryDetail: parseGeometryDetail(body.geometryDetail),
               purpose: String(body.purpose ?? ""),
+              analysisMode: parseLcaAnalysisMode(body.analysisMode),
+              outputQuality: parseLcaOutputQuality(body.outputQuality),
+              model: typeof body.model === "string" ? body.model : undefined,
+              provider: "ollama-cloud",
               dryRun: body.dryRun === true
             },
             body.projectSnapshot
@@ -507,4 +535,20 @@ function parseStringArray(value: unknown) {
 function parseGeometryDetail(value: unknown) {
   const result = z.enum(["summary", "simplified", "full"]).safeParse(value);
   return result.success ? result.data : "simplified";
+}
+
+function parseLcaAnalysisMode(value: unknown) {
+  if (value === "field-validation" || value === "classification") {
+    return value;
+  }
+
+  return "desk-study" as const;
+}
+
+function parseLcaOutputQuality(value: unknown) {
+  if (value === "conceptual" || value === "report-ready") {
+    return value;
+  }
+
+  return "professional" as const;
 }

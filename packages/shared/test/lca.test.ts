@@ -10,8 +10,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  extractLlmResponseContent,
   buildDeepSeekLcaPrompt,
   createLcaLayerFromDraft,
+  LCA_DEFAULT_OLLAMA_MODEL,
   LCA_DEEPSEEK_MODEL,
   LCA_DEEPSEEK_PROMPT_VERSION,
   parseDeepSeekLcaDraftResponse,
@@ -20,6 +22,12 @@ import {
 import { LCA_KNOWLEDGE_BANK_VERSION } from "../src/lcaKnowledgeBank.js";
 
 const request: LcaDraftAnalysisRequest = {
+  constitution: [
+    "# Landscape Character Assessment Constitution",
+    "",
+    "Follow Carys Swanwick four-step LCA process.",
+    "Separate description from judgement."
+  ].join("\n"),
   purpose: "Baseline landscape character assessment for site planning.",
   analysisMode: "desk-study",
   outputQuality: "professional",
@@ -86,6 +94,8 @@ describe("buildDeepSeekLcaPrompt", () => {
     assert.equal(user.analysisMode, "desk-study");
     assert.equal(user.outputQuality, "professional");
     assert.deepEqual(user.selectedLayerIds, request.evidence.selectedLayerIds);
+    assert.match(prompt.constitution, /Carys Swanwick four-step LCA process/);
+    assert.match(prompt.system, /LCA Constitution/);
   });
 });
 
@@ -126,7 +136,7 @@ describe("createLcaLayerFromDraft", () => {
       ],
       {
         model: "deepseek-reasoner",
-        promptVersion: "lca-deepseek-v1",
+        promptVersion: "lca-deepseek-v2",
         inputLayerIds: ["soil", "woodland"],
         evidenceFeatures: request.evidence.features
       }
@@ -209,5 +219,15 @@ describe("parseDeepSeekLcaDraftResponse", () => {
     assert.equal(result.model, "deepseek-chat");
     assert.equal(result.promptVersion, "custom-v2");
     assert.equal(result.areas[0]?.confidence, 1);
+  });
+});
+
+
+describe("extractLlmResponseContent", () => {
+  it("reads Ollama chat message content", () => {
+    const content = extractLlmResponseContent({
+      message: { role: "assistant", content: "{\"areas\":[]}" }
+    });
+    assert.equal(content, "{\"areas\":[]}");
   });
 });

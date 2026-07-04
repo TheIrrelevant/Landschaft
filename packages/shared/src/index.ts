@@ -1302,9 +1302,11 @@ export interface MapWriteDraftRequest {
 
 export {
   buildMapEvidence,
+  capMapEvidenceForLca,
   getDefaultLcaInputLayerIds,
   type MapEvidenceFeature,
   type MapLayerSummary,
+  type CapMapEvidenceOptions,
   type MapReadResult,
   type MapSpatialRelationship
 } from "./mapEvidence.js";
@@ -1322,11 +1324,31 @@ export {
   type LcaAnalysisMode,
   type LcaCodeAnatomySegment,
   type LcaEvidenceCitation,
+  type CreateLcaLayerOptions,
   type LcaDraftAnalysisRequest,
   type LcaDraftAnalysisResult,
   type LcaOutputQuality,
   type MapWriteDraftResult
 } from "./lca.js";
+export {
+  LCA_SWANWICK_CONSTITUTION_RELATIVE_PATH,
+  prepareLcaConstitutionForPrompt,
+  stripMarkdownFrontmatter
+} from "./lcaConstitution.js";
+
+export {
+  LCA_DEFAULT_OLLAMA_MODEL,
+  LCA_FEATURED_OLLAMA_MODELS,
+  LCA_LLM_PROVIDER,
+  LCA_LLM_PROVIDER_LABEL,
+  LCA_OLLAMA_ANALYSIS_ENABLED,
+  LCA_OLLAMA_ANALYSIS_PAUSED_MESSAGE,
+  OLLAMA_CLOUD_BASE_URL,
+  type LcaFeaturedModel,
+  type LcaLlmProvider
+} from "./lcaLlm.js";
+
+export { extractLlmResponseContent } from "./lca.js";
 
 export {
   createKnowledgeBankStore,
@@ -1343,3 +1365,73 @@ export {
   type DominantThemeValue,
   type IntersectingEvidenceMatch
 } from "./lcaEvidenceMatching.js";
+
+export {
+  getKnowledgeBankEntryKey,
+  mergeKnowledgeBankEntries,
+  parseKnowledgeBankRows,
+  type KnowledgeBankImportResult
+} from "./knowledgeBankImport.js";
+
+export {
+  abbreviateCode,
+  buildKnowledgeBankFromLayers,
+  describeColor,
+  isNationalMapKnowledgeLayer,
+  KNOWLEDGE_BANK_BASE_HEADERS,
+  polygonAreaSquareMeters,
+  type KnowledgeBankFromLayersResult,
+  type KnowledgeBankRecord
+} from "./knowledgeBankFromLayers.js";
+
+export {
+  enrichLayersForKnowledgeBank
+} from "./enrichLayersForKnowledgeBank.js";
+
+export {
+  collectSoilMukeysFromLayers,
+  enrichLayersWithSoilMapUnitNames,
+  fetchMapUnitNamesByMukey,
+  isSoilKnowledgeLayer
+} from "./soilMapUnitNames.js";
+
+export {
+  getBoundaryFeatureColor,
+  getBuildingFeatureColor,
+  getContourFeatureColor,
+  getHydroFeatureColor,
+  getPaletteColorForKey,
+  getSoilMapUnitColor,
+  getStructureFeatureColor,
+  getTransportFeatureColor,
+  hashString,
+  MAP_FEATURE_COLOR_PALETTE,
+  resolveKnowledgeBankMaterialColor,
+  resolveRasterKnowledgeColor,
+  resolveTransportDisplayName,
+  SOIL_COLOR_PALETTE
+} from "./mapFeatureColors.js";
+
+export {
+  formatBoundaryKindLabel,
+  formatBuildingTypeLabel,
+  formatLayerKindLabel,
+  formatStructureKindLabel,
+  formatTransportKindLabel,
+  getNlcdClassByCode,
+  getNlcdClassesForLayer,
+  getSafeDatasetId,
+  isRasterKnowledgeLayer,
+  lookupNhdFeatureName,
+  NLCD_LAND_COVER_CLASSES,
+  type NationalMapCatalogEntry
+} from "./nationalMapCatalog.js";
+
+export {
+  applySafeDatasetLayerStack,
+  getSafeDatasetDefaultOpacity,
+  getSafeDatasetLayerKey,
+  SAFE_DATASET_LAYER_OPACITY,
+  SAFE_DATASET_PANEL_STACK,
+  type SafeDatasetLayerKey
+} from "./safeDatasetLayerStack.js";

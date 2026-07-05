@@ -1,16 +1,21 @@
 ---
 type: changelog
 description: Release history for the Landschaft landscape planning editor.
-last-updated: 2026-07-04
+last-updated: 2026-07-05
 last-model: codex-gpt-5
-last-change: wire Swanwick constitution into DeepSeek LCA prompt
+last-change: switch LCA output to coded landscape unit source boundaries
 ---
 
 # Changelog
 
 ## Unreleased
 
-- Paused Ollama Cloud LCA inference in the web UI until the integration is stable; the LCA panel remains for configuration only.
+- Switched LCA output from LLM-drawn polygons to coded landscape unit layers that prefer source polygon boundaries and explicit `LDU`/`LCP`/`LT`/`RCA` code attributes.
+- Passed imported knowledge-bank mappings through the web and MCP LCA analysis path so reviewed code mappings can drive generated landscape unit codes.
+- Added live LCA run logs in the web panel and matching MCP request-id logs for snapshot preparation, prompt building, Ollama Cloud calls, response parsing, and layer creation.
+- Capped large LCA payload work before Ollama calls by sending only selected LCA layers from the browser and limiting expensive spatial relationship inference.
+- Grouped categorical map evidence for LCA prompts into feature groups with counts, summary metrics, representative coordinates, and sample attributes.
+- Enabled Ollama Cloud LCA inference with DeepSeek V4 Flash/Pro model selection, model-list timeouts, request timeouts, and smoke-tested Pro/Flash calls through the MCP bridge.
 - Fixed woodland layer rendering so tree markers no longer trigger a full-coverage gray raster plane that masked layers below.
 - Switched LCA inference to Ollama Cloud with a provider field, featured DeepSeek V4 Flash/Pro model chips, and a more-models picker backed by `/lca/models`.
 - Wired DeepSeek LCA analysis to load `Constitution/lca-swanwick.md` into the system prompt before map evidence is sent, and create a new LCA layer from the parsed response.

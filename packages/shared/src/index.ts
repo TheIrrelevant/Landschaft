@@ -1305,6 +1305,7 @@ export {
   capMapEvidenceForLca,
   getDefaultLcaInputLayerIds,
   type MapEvidenceFeature,
+  type MapFeatureGroup,
   type MapLayerSummary,
   type CapMapEvidenceOptions,
   type MapReadResult,
@@ -1314,6 +1315,7 @@ export {
 export {
   applyMapWriteDraft,
   buildDeepSeekLcaPrompt,
+  createCodedLandscapeUnitLayerFromEvidence,
   createLcaLayerFromDraft,
   generateLcaCodedId,
   generateMockLcaDraft,
@@ -1353,6 +1355,7 @@ export { extractLlmResponseContent } from "./lca.js";
 export {
   createKnowledgeBankStore,
   createPendingKnowledgeBankEntry,
+  getReviewedKnowledgeBankEntries,
   LCA_CODE_THEMES,
   LCA_KNOWLEDGE_BANK_VERSION,
   type KnowledgeBankEntry,

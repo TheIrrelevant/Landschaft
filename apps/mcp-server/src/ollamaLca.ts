@@ -4,7 +4,7 @@
  * description: Ollama Cloud remote LLM requests and cloud model listing for Landschaft LCA.
  * last-updated: 2026-07-04
  * last-model: composer-2.5
- * last-change: hardcode Ollama Cloud endpoint; remove local daemon support
+ * last-change: add timeout guard for Ollama Cloud model listing
  * ---end-metadata---
  */
 import {
@@ -33,10 +33,12 @@ function getOllamaCloudApiKey(): string {
 }
 
 export async function listOllamaCloudModels(): Promise<string[]> {
+  const timeoutMs = Number(process.env.OLLAMA_MODEL_LIST_TIMEOUT_MS ?? 15_000);
   const response = await fetch(`${OLLAMA_CLOUD_BASE_URL}/api/tags`, {
     headers: {
       authorization: `Bearer ${getOllamaCloudApiKey()}`
-    }
+    },
+    signal: AbortSignal.timeout(timeoutMs)
   });
 
   if (!response.ok) {
@@ -58,10 +60,12 @@ export async function listOllamaCloudModels(): Promise<string[]> {
 
 export async function requestOllamaCloudLca(
   prompt: DeepSeekLcaPrompt,
-  model = LCA_DEFAULT_OLLAMA_MODEL
+  model = LCA_DEFAULT_OLLAMA_MODEL,
+  options: { requestId?: string } = {}
 ) {
   const timeoutMs = Number(process.env.OLLAMA_LCA_TIMEOUT_MS ?? 180_000);
-  console.info(`[lca] Calling Ollama Cloud model: ${model} (timeout ${timeoutMs}ms)`);
+  const logPrefix = options.requestId ? `[lca:${options.requestId}]` : "[lca]";
+  console.info(`${logPrefix} Calling Ollama Cloud model: ${model} (timeout ${timeoutMs}ms)`);
   const response = await fetch(`${OLLAMA_CLOUD_BASE_URL}/api/chat`, {
     method: "POST",
     headers: {
@@ -82,6 +86,7 @@ export async function requestOllamaCloudLca(
     }),
     signal: AbortSignal.timeout(timeoutMs)
   });
+  console.info(`${logPrefix} Ollama Cloud returned HTTP ${response.status}`);
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
@@ -90,7 +95,9 @@ export async function requestOllamaCloudLca(
     );
   }
 
-  return response.json() as Promise<unknown>;
+  const payload = (await response.json()) as unknown;
+  console.info(`${logPrefix} Ollama Cloud JSON payload parsed`);
+  return payload;
 }
 
 /** @deprecated Use listOllamaCloudModels */

@@ -4,7 +4,7 @@
  * description: LCA LLM provider and featured Ollama model presets for Landschaft.
  * last-updated: 2026-07-04
  * last-model: composer-2.5
- * last-change: clarify Landschaft uses Ollama Cloud models only, not local Ollama
+ * last-change: enable Ollama Cloud LCA inference when MCP server has an API key
  * ---end-metadata---
  */
 
@@ -29,8 +29,8 @@ export const LCA_DEFAULT_OLLAMA_MODEL = "deepseek-v4-flash";
 
 export const OLLAMA_CLOUD_BASE_URL = "https://ollama.com";
 
-/** Set to true when Ollama Cloud LCA inference is ready for production use. */
-export const LCA_OLLAMA_ANALYSIS_ENABLED = false;
+/** Ollama Cloud LCA inference runs through the MCP HTTP bridge with OLLAMA_API_KEY. */
+export const LCA_OLLAMA_ANALYSIS_ENABLED = true;
 
 export const LCA_OLLAMA_ANALYSIS_PAUSED_MESSAGE =
   "Ollama Cloud LCA analysis is temporarily paused. Configuration and constitution remain available; automated inference will return in a later release.";

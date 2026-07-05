@@ -29,6 +29,7 @@ export function LcaAnalysisPanel() {
     lcaModelsLoading,
     lcaOutputQuality,
     lcaPurpose,
+    lcaRunLogs,
     lcaSelectedLayerIds,
     layers,
     runLcaDraftAnalysis,
@@ -231,6 +232,30 @@ export function LcaAnalysisPanel() {
 
       {LCA_OLLAMA_ANALYSIS_ENABLED && lcaAnalyzing ? (
         <p className="lca-analysis-hint">Ollama Cloud analysis may take up to 3 minutes. Refresh the page to cancel a stuck request.</p>
+      ) : null}
+
+      {lcaRunLogs.length > 0 ? (
+        <section className="lca-run-log" aria-label="LCA run log">
+          <div className="lca-run-log-header">
+            <span>Run log</span>
+            <span>{lcaRunLogs.length} steps</span>
+          </div>
+          <ol>
+            {lcaRunLogs.map((entry) => (
+              <li className={`lca-run-log-row lca-run-log-${entry.level}`} key={entry.id}>
+                <span className="lca-run-log-time">
+                  +{(entry.elapsedMs / 1000).toFixed(1)}s
+                </span>
+                <span className="lca-run-log-message">
+                  {entry.message}
+                  {entry.detail ? (
+                    <small>{entry.detail}</small>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
       ) : null}
 
       <button

@@ -159,6 +159,10 @@ export function createKnowledgeBankStore(
   };
 }
 
+export function getReviewedKnowledgeBankEntries(): KnowledgeBankEntry[] {
+  return REVIEWED_KNOWLEDGE_BANK.map((entry) => ({ ...entry }));
+}
+
 export function createPendingKnowledgeBankEntry(
   theme: LcaCodeTheme,
   sourceValue: string

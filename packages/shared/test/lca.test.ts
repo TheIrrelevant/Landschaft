@@ -12,14 +12,19 @@ import { describe, it } from "node:test";
 import {
   extractLlmResponseContent,
   buildDeepSeekLcaPrompt,
+  createCodedLandscapeUnitLayerFromEvidence,
   createLcaLayerFromDraft,
+  generateMockLcaDraft,
   LCA_DEFAULT_OLLAMA_MODEL,
   LCA_DEEPSEEK_MODEL,
   LCA_DEEPSEEK_PROMPT_VERSION,
   parseDeepSeekLcaDraftResponse,
   type LcaDraftAnalysisRequest
 } from "../src/index.js";
-import { LCA_KNOWLEDGE_BANK_VERSION } from "../src/lcaKnowledgeBank.js";
+import {
+  LCA_KNOWLEDGE_BANK_VERSION,
+  type KnowledgeBankEntry
+} from "../src/lcaKnowledgeBank.js";
 
 const request: LcaDraftAnalysisRequest = {
   constitution: [
@@ -166,6 +171,186 @@ describe("createLcaLayerFromDraft", () => {
     assert.equal(evidenceCitations[0]?.sourceFeatureId, "soil-a");
     assert.match(evidenceCitations[0]?.excerpt ?? "", /soil: loam/);
     assert.match(evidenceCitations[0]?.excerpt ?? "", /polygon-intersects/);
+  });
+
+  it("uses imported knowledge-bank entries for draft code anatomy", () => {
+    const importedEntries: KnowledgeBankEntry[] = [
+      {
+        id: "kb-import-soil-loam",
+        theme: "soil",
+        sourceValue: "loam",
+        codeSegment: "LX",
+        meaning: "Locally reviewed loam terrace class.",
+        classificationRule: "Imported local soil code mapping.",
+        status: "reviewed",
+        version: LCA_KNOWLEDGE_BANK_VERSION,
+        usageCount: 0,
+        importSource: "knowledge-base-sheet"
+      }
+    ];
+    const analysis = generateMockLcaDraft({
+      ...request,
+      knowledgeBankEntries: importedEntries
+    });
+    const layer = createLcaLayerFromDraft(
+      {
+        id: "project-demo",
+        name: "Demo",
+        coordinateReferenceSystem: "EPSG:4326",
+        corners: [
+          { label: "NW", latitude: 0, longitude: 0 },
+          { label: "NE", latitude: 0, longitude: 1 },
+          { label: "SE", latitude: -1, longitude: 1 },
+          { label: "SW", latitude: -1, longitude: 0 }
+        ],
+        realWorldExtentMeters: {
+          width: 100,
+          depth: 80
+        }
+      },
+      analysis.areas,
+      analysis
+    );
+    const attributes = layer.features?.[0]?.attributes;
+    const codeAnatomy = JSON.parse(attributes?.codeAnatomy ?? "[]") as {
+      segment: string;
+      sourceValue: string;
+      classificationRule: string;
+    }[];
+
+    assert.match(attributes?.characterCode ?? "", /^LX/);
+    assert.equal(codeAnatomy[0]?.segment, "LX");
+    assert.equal(codeAnatomy[0]?.sourceValue, "loam");
+    assert.equal(codeAnatomy[0]?.classificationRule, "Imported local soil code mapping.");
+  });
+});
+
+describe("createCodedLandscapeUnitLayerFromEvidence", () => {
+  it("uses explicit LDU source codes and source polygon geometry", () => {
+    const layer = createCodedLandscapeUnitLayerFromEvidence(
+      {
+        id: "project-demo",
+        name: "Demo",
+        coordinateReferenceSystem: "EPSG:4326",
+        corners: [
+          { label: "NW", latitude: 0, longitude: 0 },
+          { label: "NE", latitude: 0, longitude: 1 },
+          { label: "SE", latitude: -1, longitude: 1 },
+          { label: "SW", latitude: -1, longitude: 0 }
+        ],
+        realWorldExtentMeters: {
+          width: 100,
+          depth: 80
+        }
+      },
+      {
+        ...request.evidence,
+        features: [
+          {
+            id: "ldu-source-a",
+            layerId: "ldu",
+            layerName: "Landscape Description Units",
+            label: "Source LDU",
+            geometryType: "polygon",
+            coordinates: [
+              [10, 10],
+              [90, 10],
+              [90, 60],
+              [10, 60]
+            ],
+            attributes: {
+              LDU_CODE: "MW54",
+              landscape_type: "Principal Timbered Farmlands"
+            }
+          }
+        ]
+      },
+      {
+        model: "deepseek-v4-pro@ollama",
+        promptVersion: "lca-deepseek-v2",
+        inputLayerIds: ["ldu"],
+        areas: [
+          {
+            id: "llm-area",
+            label: "LLM area",
+            ring: [
+              [0, 0],
+              [100, 0],
+              [100, 80],
+              [0, 80],
+              [0, 0]
+            ],
+            layer: "lca",
+            code: "MW54",
+            meaning: "LLM characterization for LDU MW54.",
+            confidence: 0.84
+          }
+        ]
+      }
+    );
+
+    const feature = layer?.features?.[0];
+    assert.ok(layer);
+    assert.equal(layer.name.startsWith("Landscape Character Units"), true);
+    assert.equal(feature?.label, "LDU MW54");
+    assert.equal(feature?.attributes.landscapeUnitType, "LDU");
+    assert.equal(feature?.attributes.landscapeUnitCode, "MW54");
+    assert.equal(feature?.attributes.boundarySource, "source-polygon");
+    assert.equal(feature?.attributes.meaning, "LLM characterization for LDU MW54.");
+    assert.deepEqual(feature?.coordinates, [
+      [10, 10],
+      [90, 10],
+      [90, 60],
+      [10, 60]
+    ]);
+  });
+
+  it("uses imported knowledge-bank codes when explicit unit code attributes are absent", () => {
+    const layer = createCodedLandscapeUnitLayerFromEvidence(
+      {
+        id: "project-demo",
+        name: "Demo",
+        coordinateReferenceSystem: "EPSG:4326",
+        corners: [
+          { label: "NW", latitude: 0, longitude: 0 },
+          { label: "NE", latitude: 0, longitude: 1 },
+          { label: "SE", latitude: -1, longitude: 1 },
+          { label: "SW", latitude: -1, longitude: 0 }
+        ],
+        realWorldExtentMeters: {
+          width: 100,
+          depth: 80
+        }
+      },
+      request.evidence,
+      {
+        model: "landschaft-mock-lca",
+        promptVersion: "lca-mvp-v1",
+        inputLayerIds: ["soil"],
+        areas: [],
+        knowledgeBankEntries: [
+          {
+            id: "kb-import-soil-loam",
+            theme: "soil",
+            sourceValue: "loam",
+            codeSegment: "23E3AK34ELE",
+            meaning: "Imported local landscape unit code.",
+            classificationRule: "Imported local code mapping.",
+            status: "reviewed",
+            version: LCA_KNOWLEDGE_BANK_VERSION,
+            usageCount: 0,
+            importSource: "knowledge-base-sheet"
+          }
+        ]
+      }
+    );
+
+    const feature = layer?.features?.[0];
+    assert.ok(layer);
+    assert.equal(feature?.attributes.landscapeUnitType, "LCA");
+    assert.equal(feature?.attributes.landscapeUnitCode, "23E3AK34ELE");
+    assert.equal(feature?.attributes.codeSource, "knowledge-bank");
+    assert.equal(feature?.attributes.sourceValue, "loam");
   });
 });
 

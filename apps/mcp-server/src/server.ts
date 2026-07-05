@@ -448,6 +448,7 @@ function startHttpBridge() {
           response,
           await handleLcaAnalyze(
             {
+              requestId: typeof body.requestId === "string" ? body.requestId : undefined,
               projectId: String(body.projectId ?? ""),
               selectedLayerIds: parseStringArray(body.selectedLayerIds),
               extentAreaId:
@@ -458,7 +459,10 @@ function startHttpBridge() {
               outputQuality: parseLcaOutputQuality(body.outputQuality),
               model: typeof body.model === "string" ? body.model : undefined,
               provider: "ollama-cloud",
-              dryRun: body.dryRun === true
+              dryRun: body.dryRun === true,
+              knowledgeBankEntries: Array.isArray(body.knowledgeBankEntries)
+                ? body.knowledgeBankEntries
+                : undefined
             },
             body.projectSnapshot
           )

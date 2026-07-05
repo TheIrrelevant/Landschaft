@@ -95,4 +95,66 @@ describe("buildMapEvidence", () => {
     assert.ok(overlap);
     assert.deepEqual(overlap?.layerIds.sort(), ["soil", "woodland"]);
   });
+
+  it("groups categorical features into LCA evidence summaries", () => {
+    const evidence = buildMapEvidence(
+      {
+        project,
+        layers: [
+          {
+            id: "soil",
+            name: "Soil",
+            kind: "foundational-map",
+            visible: true,
+            opacity: 1,
+            reviewStatus: "draft",
+            category: "soil",
+            geometryType: "polygon",
+            features: [
+              {
+                id: "red-soil-a",
+                label: "Red soil A",
+                geometryType: "polygon",
+                coordinates: [
+                  [0, 0],
+                  [20, 0],
+                  [20, 20],
+                  [0, 20]
+                ],
+                attributes: { soil: "red soil", drainage: "moderate" },
+                planningImpact: "Red soil evidence."
+              },
+              {
+                id: "red-soil-b",
+                label: "Red soil B",
+                geometryType: "polygon",
+                coordinates: [
+                  [30, 0],
+                  [50, 0],
+                  [50, 20],
+                  [30, 20]
+                ],
+                attributes: { soil: "red soil", drainage: "moderate" },
+                planningImpact: "Red soil evidence."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        projectId: project.id,
+        selectedLayerIds: ["soil"],
+        geometryDetail: "summary"
+      }
+    );
+
+    const redSoilGroup = evidence.featureGroups.find(
+      (group) => group.sourceValue === "red soil"
+    );
+
+    assert.ok(redSoilGroup);
+    assert.equal(redSoilGroup?.featureCount, 2);
+    assert.equal(redSoilGroup?.totalAreaSquareMeters, 800);
+    assert.deepEqual(redSoilGroup?.representativeFeatureIds, ["red-soil-a", "red-soil-b"]);
+  });
 });

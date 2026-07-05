@@ -3,7 +3,7 @@
  * description: Vite configuration for the Landschaft web editor.
  * last-updated: 2026-06-27
  * last-model: codex-gpt-5
- * last-change: align chunk warning limit with the WebGPU vendor runtime
+ * last-change: keep React Three packages in vendor chunk to avoid circular output chunks
  */
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -24,13 +24,6 @@ export default defineConfig({
             id.includes("/scheduler/")
           ) {
             return "react-vendor";
-          }
-
-          if (
-            id.includes("/@react-three/fiber/") ||
-            id.includes("/@react-three/drei/")
-          ) {
-            return "react-three";
           }
 
           if (id.includes("/three/")) {

@@ -9,12 +9,14 @@
  */
 import {
   buildMapEvidence,
+  createCodedLandscapeUnitLayerFromEvidence,
   createLcaLayerFromDraft,
   applySafeDatasetLayerStack,
   buildKnowledgeBankFromLayers,
   enrichLayersForKnowledgeBank,
   generateMockLcaDraft,
   getSafeDatasetDefaultOpacity,
+  parseKnowledgeBankRows,
   LCA_DEFAULT_OLLAMA_MODEL,
   LCA_LLM_PROVIDER,
   LCA_OLLAMA_ANALYSIS_ENABLED,
@@ -27,6 +29,7 @@ import {
   generateTerrainProjectAsync,
   ProjectSnapshotSchema,
   type CodedArea,
+  type KnowledgeBankEntry,
   type LcaDraftAnalysisResult,
   type OrthophotoCorner,
   type PlanningLayer,
@@ -116,6 +119,14 @@ interface LcaBackendAnalysisResult {
   layer: PlanningLayer;
 }
 
+interface LcaRunLogEntry {
+  id: string;
+  elapsedMs: number;
+  level: "info" | "success" | "warning" | "error";
+  message: string;
+  detail?: string;
+}
+
 type EditorPersistedState = Pick<
   EditorState,
   | "coordinateStep"
@@ -154,6 +165,7 @@ interface EditorState {
   lcaSelectedLayerIds: string[];
   lcaAnalyzing: boolean;
   lcaAnalysisError: string | null;
+  lcaRunLogs: LcaRunLogEntry[];
   workflowMode: EditorWorkflowMode;
   lcaAnalysisMode: LcaAnalysisMode;
   lcaOutputQuality: LcaOutputQuality;
@@ -862,6 +874,56 @@ function applyKnowledgeBankSheetToState(sheet: KnowledgeBankSheetSnapshot) {
   };
 }
 
+function countFilledSheetRows(rows: string[][]) {
+  return rows.filter((row) => row.some((cell) => cell.trim())).length;
+}
+
+function extractImportedKnowledgeBankEntries(
+  sheet: KnowledgeBankSheetSnapshot
+): KnowledgeBankEntry[] {
+  const headerIndex = sheet.rows.findIndex((row) => row.some((cell) => cell.trim()));
+  if (headerIndex < 0) {
+    return [];
+  }
+
+  const headers = sheet.rows[headerIndex]?.map((cell) => cell.trim()) ?? [];
+  if (!hasKnowledgeBankMappingHeaders(headers)) {
+    return [];
+  }
+
+  const records = sheet.rows.slice(headerIndex + 1).flatMap((row) => {
+    if (!row.some((cell) => cell.trim())) {
+      return [];
+    }
+
+    const record: Record<string, string> = {};
+    headers.forEach((header, index) => {
+      if (header) {
+        record[header] = row[index] ?? "";
+      }
+    });
+    return [record];
+  });
+
+  return parseKnowledgeBankRows(records, {
+    importSource: "knowledge-base-sheet"
+  }).entries;
+}
+
+function hasKnowledgeBankMappingHeaders(headers: string[]) {
+  const normalized = headers.map((header) =>
+    header.trim().toLowerCase().replace(/[\s_-]+/g, "")
+  );
+  const hasTheme = normalized.some((header) =>
+    ["theme", "category", "themecategory", "codetheme"].includes(header)
+  );
+  const hasSourceValue = normalized.some((header) =>
+    ["sourcevalue", "value", "gisvalue"].includes(header)
+  );
+
+  return hasTheme && hasSourceValue;
+}
+
 function loadProjectSnapshot(): ProjectSnapshot | null {
   const legacySnapshot = loadProjectSnapshotLegacySync();
   if (!legacySnapshot) {
@@ -882,6 +944,19 @@ function toProjectSnapshot(state: EditorPersistedState): ProjectSnapshot {
     selectedFeatureId: state.selectedFeatureId,
     coordinateStep: state.coordinateStep,
     orthophotoPreviewUrl: state.orthophotoPreviewUrl
+  };
+}
+
+function toLcaProjectSnapshot(
+  state: EditorPersistedState,
+  selectedLayerIds: string[]
+): ProjectSnapshot {
+  const selectedLayerIdSet = new Set(selectedLayerIds);
+  return {
+    ...toProjectSnapshot(state),
+    layers: state.layers.filter((layer) => selectedLayerIdSet.has(layer.id)),
+    selectedLayerId: selectedLayerIds[0] ?? null,
+    selectedFeatureId: null
   };
 }
 
@@ -927,6 +1002,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   lcaSelectedLayerIds: [],
   lcaAnalyzing: false,
   lcaAnalysisError: null,
+  lcaRunLogs: [],
   workflowMode: "design",
   lcaAnalysisMode: "desk-study",
   lcaOutputQuality: "professional",
@@ -1549,9 +1625,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   importKnowledgeBankSheet: (fileName, grid) =>
     set(() => {
       const sheet = normalizeKnowledgeBankSheet(grid, [], []);
+      const filledRowCount = countFilledSheetRows(grid);
       return {
         ...applyKnowledgeBankSheetToState(sheet),
-        knowledgeBankImportMessage: `Imported ${sheet.rows.length} rows from ${fileName}.`
+        knowledgeBankImportMessage: `Imported ${filledRowCount} rows from ${fileName}.`
       };
     }),
   syncKnowledgeBankFromLayers: async () => {
@@ -1582,7 +1659,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         {
           rows: state.knowledgeBankGrid,
           columnWidths: state.knowledgeBankColumnWidths,
-          rowHeights: state.knowledgeBankRowHeights
+          rowHeights: state.knowledgeBankRowHeights,
+          columnHeaders: state.knowledgeBankColumnHeaders,
+          materialColors: state.knowledgeBankMaterialColors,
+          textSummary: state.knowledgeBankTextSummary
         },
         row,
         col,
@@ -1655,7 +1735,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
 
     const state = get();
-    set({ lcaAnalyzing: true, lcaAnalysisError: null });
+    const requestId = createLcaRequestId();
+    const startedAt = performance.now();
+    const addRunLog = (
+      message: string,
+      level: LcaRunLogEntry["level"] = "info",
+      detail?: string
+    ) => {
+      const elapsedMs = Math.round(performance.now() - startedAt);
+      set((current) => ({
+        lcaRunLogs: [
+          ...current.lcaRunLogs,
+          {
+            id: `${requestId}-${current.lcaRunLogs.length}`,
+            elapsedMs,
+            level,
+            message,
+            detail
+          }
+        ].slice(-80)
+      }));
+    };
+
+    set({ lcaAnalyzing: true, lcaAnalysisError: null, lcaRunLogs: [] });
+    addRunLog("Run started.", "info", `requestId=${requestId}`);
 
     try {
       const selectedLayerIds = state.lcaSelectedLayerIds.length
@@ -1666,21 +1769,56 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         throw new Error("Select at least one input layer for LCA analysis.");
       }
 
+      addRunLog(
+        "Input layers selected.",
+        "info",
+        selectedLayerIds.join(", ")
+      );
+      await waitForUiFrame();
+
       let fallbackMessage: string | null = null;
       let layer: PlanningLayer;
+      const knowledgeBankEntries = extractImportedKnowledgeBankEntries({
+        rows: state.knowledgeBankGrid,
+        columnWidths: state.knowledgeBankColumnWidths,
+        rowHeights: state.knowledgeBankRowHeights,
+        columnHeaders: state.knowledgeBankColumnHeaders,
+        materialColors: state.knowledgeBankMaterialColors,
+        textSummary: state.knowledgeBankTextSummary
+      });
 
       try {
+        addRunLog("Creating selected-layer project snapshot.");
+        const projectSnapshot = toLcaProjectSnapshot(state, selectedLayerIds);
+        const featureCount = projectSnapshot.layers.reduce(
+          (total, inputLayer) => total + (inputLayer.features?.length ?? 0),
+          0
+        );
+        addRunLog(
+          "Project snapshot ready.",
+          "success",
+          `${projectSnapshot.layers.length} layers, ${featureCount} features`
+        );
         const result = await fetchLcaAnalysis(
           state.project.id,
           selectedLayerIds,
           state.lcaPurpose,
-          toProjectSnapshot(state),
+          projectSnapshot,
           state.lcaAnalysisMode,
           state.lcaOutputQuality,
-          state.lcaModel
+          state.lcaModel,
+          knowledgeBankEntries,
+          requestId,
+          addRunLog
         );
         layer = result.layer;
+        addRunLog("LCA layer received from backend.", "success", layer.name);
       } catch (backendError) {
+        addRunLog(
+          "Backend analysis failed; generating local fallback draft.",
+          "warning",
+          backendError instanceof Error ? backendError.message : "Unknown backend error."
+        );
         const evidence = buildMapEvidence(
           { project: state.project, layers: state.layers },
           {
@@ -1693,15 +1831,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           purpose: state.lcaPurpose,
           evidence,
           analysisMode: state.lcaAnalysisMode,
-          outputQuality: state.lcaOutputQuality
+          outputQuality: state.lcaOutputQuality,
+          knowledgeBankEntries
         });
-        layer = createLcaLayerFromDraft(state.project, analysis.areas, analysis);
+        layer = createCodedLandscapeUnitLayerFromEvidence(
+          state.project,
+          evidence,
+          analysis
+        ) ?? createLcaLayerFromDraft(state.project, analysis.areas, analysis);
         fallbackMessage = `Ollama Cloud was not reached — generated a local mock draft instead. ${
           backendError instanceof Error ? backendError.message : "Unknown backend error."
         }`;
+        addRunLog("Local fallback LCA layer created.", "warning", layer.name);
       }
 
       const layers = insertOrReplaceLayer(state.layers, layer);
+      addRunLog("Saving LCA layer into project state.", "info", layer.id);
       const nextState = {
         workflowMode: "lca-analysis" as const,
         activeMode: "top-view" as const,
@@ -1716,7 +1861,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       };
       saveProjectSnapshot(toProjectSnapshot({ ...state, ...nextState }));
       set(nextState);
+      addRunLog("Run complete.", fallbackMessage ? "warning" : "success");
     } catch (error) {
+      addRunLog(
+        "Run failed.",
+        "error",
+        error instanceof Error ? error.message : "LCA analysis failed."
+      );
       set({
         lcaAnalyzing: false,
         lcaAnalysisError:
@@ -2080,14 +2231,24 @@ async function fetchSafeDatasetImport(
 
 async function fetchLcaModels(bridgeUrl: string): Promise<string[]> {
   let response: Response;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
 
   try {
-    response = await fetch(`${bridgeUrl}/lca/models`);
+    response = await fetch(`${bridgeUrl}/lca/models`, {
+      signal: controller.signal
+    });
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("LCA model listing timed out after 20 seconds.");
+    }
+
     throw new Error(
       `LCA model listing is unavailable at ${bridgeUrl}. Start the MCP server with npm run dev:mcp.`,
       { cause: error }
     );
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 
   if (!response.ok) {
@@ -2113,7 +2274,14 @@ async function fetchLcaAnalysis(
   projectSnapshot: ProjectSnapshot,
   analysisMode: LcaAnalysisMode,
   outputQuality: LcaOutputQuality,
-  model: string
+  model: string,
+  knowledgeBankEntries: KnowledgeBankEntry[],
+  requestId: string,
+  onLog: (
+    message: string,
+    level?: LcaRunLogEntry["level"],
+    detail?: string
+  ) => void
 ): Promise<LcaBackendAnalysisResult> {
   let response: Response;
 
@@ -2121,24 +2289,36 @@ async function fetchLcaAnalysis(
   const timeoutId = window.setTimeout(() => controller.abort(), LCA_ANALYZE_TIMEOUT_MS);
 
   try {
+    onLog("Serializing backend request payload.");
+    const requestBody = JSON.stringify({
+      requestId,
+      projectId,
+      selectedLayerIds,
+      geometryDetail: "summary",
+      purpose,
+      analysisMode,
+      outputQuality,
+      model,
+      provider: "ollama-cloud",
+      knowledgeBankEntries,
+      projectSnapshot
+    });
+    onLog(
+      "Payload serialized.",
+      "success",
+      `${Math.round(new Blob([requestBody]).size / 1024)} KB`
+    );
+    await waitForUiFrame();
+    onLog("Posting request to MCP LCA bridge.", "info", safeDatasetBridgeUrl);
     response = await fetch(`${safeDatasetBridgeUrl}/lca/analyze`, {
-      body: JSON.stringify({
-        projectId,
-        selectedLayerIds,
-        geometryDetail: "summary",
-        purpose,
-        analysisMode,
-        outputQuality,
-        model,
-        provider: "ollama-cloud",
-        projectSnapshot
-      }),
+      body: requestBody,
       headers: {
         "content-type": "application/json"
       },
       method: "POST",
       signal: controller.signal
     });
+    onLog("MCP bridge returned response headers.", "success", `HTTP ${response.status}`);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(
@@ -2163,7 +2343,18 @@ async function fetchLcaAnalysis(
     );
   }
 
+  onLog("Reading backend JSON response.");
   return (await response.json()) as LcaBackendAnalysisResult;
+}
+
+function createLcaRequestId() {
+  return `lca-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function waitForUiFrame() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
 }
 
 function summarizeSafeDatasetImport(result: SafeDatasetBackendImportResult) {
